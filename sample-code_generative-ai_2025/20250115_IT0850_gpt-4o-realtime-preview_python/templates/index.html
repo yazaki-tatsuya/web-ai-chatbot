@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>AIチャットインターフェース</title>
+    <!-- integrity 属性を削除 -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background-color: #f0f2f5; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: flex-start; 
+            height: 100vh; 
+            margin: 0;
+        }
+        #chat { 
+            width: 80%; 
+            max-width: 800px; 
+            margin: 20px auto; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            height: 400px; 
+            overflow-y: scroll; 
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            border-radius: 5px;
+        }
+        .message { 
+            padding: 10px; 
+            margin: 5px 0; 
+            border-radius: 5px; 
+            max-width: 70%;
+            word-wrap: break-word;
+        }
+        .user { 
+            background-color: #d1e7dd; 
+            text-align: right; 
+            margin-left: auto;
+        }
+        .ai { 
+            background-color: #f8d7da; 
+            text-align: left; 
+            margin-right: auto;
+        }
+        #status { 
+            width: 80%; 
+            max-width: 800px; 
+            margin: 10px auto; 
+            font-size: 0.9em; 
+            color: gray; 
+            height: 100px; 
+            overflow-y: scroll; 
+            border: 1px solid #ccc; 
+            padding: 5px; 
+            background-color: #f1f1f1;
+            box-shadow: 0 0 5px rgba(0,0,0,0.05);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat"></div>
+    <div id="status"></div>
+
+    <script>
+        const socket = io();
+
+        // ユーザーの発言を表示する関数
+        function addUserMessage(message) {
+            const chat = document.getElementById('chat');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message user';
+            msgDiv.textContent = message;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+            console.log('ユーザーのメッセージを追加しました:', message);
+        }
+
+        // AIの応答を表示する関数
+        function addAIMessage(message) {
+            const chat = document.getElementById('chat');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ai';
+            msgDiv.textContent = message;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+            console.log('AIのメッセージを追加しました:', message);
+        }
+
+        // ステータスメッセージを表示する関数
+        function addStatusMessage(message) {
+            const status = document.getElementById('status');
+            const statusMsg = document.createElement('div');
+            statusMsg.textContent = message;
+            status.appendChild(statusMsg);
+            status.scrollTop = status.scrollHeight;
+            console.log('ステータスメッセージを追加しました:', message);
+        }
+
+        socket.on('connect', () => {
+            console.log('サーバーに接続しました。');
+            // ユーザーの接続をチャットに表示
+            addUserMessage('ユーザーが接続しました。');
+        });
+
+        socket.on('user_message', (data) => {
+            const chat = document.getElementById('chat');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message user';
+            msgDiv.textContent = data.message;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+            console.log('ユーザーのメッセージ:', data.message);
+            addUserMessage(data.message);
+        });
+
+        socket.on('ai_message', (data) => {
+            console.log('AIのメッセージ:', data.message);
+            // AIメッセージがオブジェクトの場合は、テキストを抽出
+            if (typeof data.message === 'object' && data.message !== null) {
+                // 必要に応じて適切なフィールドを抽出
+                // 例: { type: 'audio', transcript: '...' }
+                const transcript = data.message.transcript || JSON.stringify(data.message);
+                addAIMessage(transcript);
+            } else {
+                addAIMessage(data.message);
+            }
+        });
+
+        socket.on('status_message', (data) => {
+            console.log('ステータスメッセージ:', data.message);
+            addStatusMessage(data.message);
+        });
+
+        // ユーザーからの音声入力が完了したら、ユーザーのメッセージをチャットに追加するロジックを追加することも可能です。
+        // 現在はバックエンドからのメッセージのみを表示しています。
+    </script>
+</body>
+</html>
