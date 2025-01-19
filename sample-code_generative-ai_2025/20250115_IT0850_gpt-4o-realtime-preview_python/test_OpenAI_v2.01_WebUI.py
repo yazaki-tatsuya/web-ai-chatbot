@@ -215,6 +215,18 @@ def play_audio(audio_data):
     """キューに音声データを追加"""
     audio_receive_queue.put(audio_data)
 
+'''
+    用途
+        マイクからの音声を録音し、サーバーに送信する関数
+    引数
+        ws（WebSocketオブジェクト）
+    戻り値
+        なし
+    処理概要
+        この関数は録音が終了するまで、無限ループで動作し続けます。
+        マイクからの音声を録音し、録音中音声データをチャンクごとにサーバーに送信します。
+        録音が終了した場合は、サーバーに録音終了を通知します。
+'''
 def record_audio(ws):
     try:
         p = pyaudio.PyAudio()
@@ -231,7 +243,8 @@ def record_audio(ws):
                         frames_per_buffer=chunk_size)
         print("マイクからの録音を開始しました。")
         socketio.emit('status_message', {'message': "マイクからの録音を開始しました。"})
-        
+        # チャンクカウンター
+        chunk_counter = 0        
         while True:
             try:
                 # マイクからの音声データを取得
@@ -243,14 +256,15 @@ def record_audio(ws):
                 
                 # base64形式にエンコード
                 base64_audio = base64.b64encode(audio_data.tobytes()).decode('utf-8')
-                
+                chunk_counter += 1
                 # サーバーに音声データを送信（チャンクごとに送信）
                 input_audio = {
                     "type": "input_audio_buffer.append",
                     "audio": base64_audio
                 }
                 ws.send(json.dumps(input_audio))
-                print(f"音声チャンクを送信しました。")
+                print(f"音声チャンクを送信：{chunk_counter}")
+                # 音声チャンクを送信したことを通知するイベント
                 socketio.emit('status_message', {'message': "音声チャンクを送信しました。"})
                 
                 # サーバーがチャンクを処理するために少し待機
@@ -266,7 +280,6 @@ def record_audio(ws):
         p.terminate()         # PyAudioを終了
 
         print("録音を終了しました。")
-        socketio.emit('user_message', {'message': "bbbbb"})  # 録音データをメッセージに
         socketio.emit('status_message', {'message': "録音を終了しました。"})
         
         # 以下はサーバー側がストリーム終了を自動検知する場合は不要
