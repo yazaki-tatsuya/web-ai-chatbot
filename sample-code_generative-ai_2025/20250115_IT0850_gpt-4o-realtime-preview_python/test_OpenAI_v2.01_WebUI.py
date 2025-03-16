@@ -162,9 +162,9 @@ def on_open(ws):
                 "model": "whisper-1"
             },
             # --- AIが発話中でも割り込みを許可 ---
-            "output_audio": {
-                "interruptible": True
-            }
+            # "output_audio": {
+            #     "interruptible": True
+            # }
             # --- ここまで ---
         }
     }
