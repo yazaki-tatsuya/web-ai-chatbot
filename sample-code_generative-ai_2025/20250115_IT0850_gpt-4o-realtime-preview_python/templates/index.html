@@ -1,3 +1,6 @@
+<!-- 
+    とりあえず、口パクの画像切り換えに挑戦するも、それすらも上手くいかない。
+-->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -59,14 +62,42 @@
             box-shadow: 0 0 5px rgba(0,0,0,0.05);
             border-radius: 5px;
         }
+        /* AIアバター用のスタイル */
+        #ai-avatar-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            margin-bottom: 10px;
+        }
+        #ai-avatar {
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
+    <!-- AIアバター表示エリア -->
+    <div id="ai-avatar-container">
+        <img id="ai-avatar" src="/static/ai_avatar_closed.png" alt="AI Avatar">
+    </div>
     <div id="chat"></div>
     <div id="status"></div>
 
     <script>
         const socket = io();
+
+
+        // AIアバターの口の動きを、テキストの長さに合わせて保持する関数
+        function animateAvatarForText(text) {
+            const avatarImg = document.getElementById('ai-avatar');
+            // 口を開く
+            avatarImg.src = "/static/ai_avatar_open.png";
+            // 例として、最低1秒＋1文字あたり200msに設定（必要に応じて調整）
+            const duration = 1000 + text.length * 200;
+            setTimeout(() => {
+                avatarImg.src = "/static/ai_avatar_closed.png";
+            }, duration);
+        }
 
         // ユーザーの発言を表示する関数
         function addUserMessage(message) {
@@ -88,6 +119,8 @@
             chat.appendChild(msgDiv);
             chat.scrollTop = chat.scrollHeight;
             console.log('AIのメッセージを追加しました:', message);
+            // AIの応答に合わせてアバターの口を動かす
+            animateAvatarForText(message);
         }
 
         // ステータスメッセージを表示する関数
