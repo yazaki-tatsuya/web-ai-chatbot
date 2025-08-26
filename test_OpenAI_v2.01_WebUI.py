@@ -44,8 +44,11 @@ user_transcription_buffer = ""
 # AIの最後の応答を記録する変数
 last_ai_message = ""
 
+# ★ 追加：AI出力音声の文字起こし用バッファ（最小修正）
+ai_transcription_buffer = ""
+
 def on_message(ws, message):
-    global user_transcription_buffer, last_ai_message
+    global user_transcription_buffer, last_ai_message, ai_transcription_buffer
     try:
         message_data = json.loads(message)
         msg_type = message_data.get("type")
@@ -61,14 +64,17 @@ def on_message(ws, message):
             last_ai_message = final_text  # AIの最後のメッセージを記録
         
         elif msg_type == "response.content_part.done":
-            content = message_data.get("content")
+            # content あるいは part の中に output_text が入ってくるケースを想定（最小限の頑健化）
+            content = message_data.get("content") or message_data.get("part")
             if isinstance(content, dict):
-                transcript = content.get("transcript", "")
+                # output_text のときは text、音声のときは transcript が入る可能性を想定
+                text_or_transcript = content.get("text") or content.get("transcript") or ""
             else:
-                transcript = str(content)
-            print(f"AIの応答（content_part.done）: {transcript}")
-            socketio.emit('ai_message', {'message': transcript})
-            last_ai_message = transcript  # AIの最後のメッセージを記録
+                text_or_transcript = str(content)
+            print(f"AIの応答（content_part.done）: {text_or_transcript}")
+            if text_or_transcript:
+                socketio.emit('ai_message', {'message': text_or_transcript})
+                last_ai_message = text_or_transcript  # AIの最後のメッセージを記録
         
         elif msg_type == "audio":
             transcript = message_data.get("transcript")
@@ -77,11 +83,12 @@ def on_message(ws, message):
                 socketio.emit('ai_message', {'message': transcript})
                 last_ai_message = transcript  # AIの最後のメッセージを記録
         
+        # ★ 変更：AI出力音声の逐次文字起こしは AI 側のバッファに積む
         elif msg_type == "response.audio_transcript.delta":
-            delta = message_data.get("delta")
-            user_transcription_buffer += delta
-            print(f"ユーザーの発言（delta）: {delta}")
-            # 部分的な発言はまだ送信しない
+            delta = message_data.get("delta") or ""
+            ai_transcription_buffer += delta
+            print(f"AIの応答（audio_transcript.delta）: {delta}")
+            # 部分はまだ送らず、確定でまとめて送る
 
         # ユーザーの発言（仮定）
         elif msg_type == "user.transcription":
@@ -105,23 +112,29 @@ def on_message(ws, message):
             print(message_data)
             socketio.emit('user_message', {'message': message_data})
 
+        # --- 参考（ユーザー入力の確定テキストを受ける場合）---
         # elif msg_type == "response.audio_transcript.done":
         #     transcription = user_transcription_buffer
         #     user_transcription_buffer = ""
         #     print(f"ユーザーの発言（完了）: {transcription}")
-        #     # AIの応答と同じ内容の場合はユーザーのメッセージとして送信しない
         #     socketio.emit('user_message', {'message': "aaa"})
-        
+        # -----------------------------------------------
+
         elif msg_type == "response.audio.delta":
             # 音声データの処理（必要に応じて）
             delta = message_data.get("delta")
             audio_data = base64.b64decode(delta)
             audio_receive_queue.put(audio_data)
         
-        elif msg_type == "response.audio_transcript_done":
-            # 追加の終了メッセージがあれば処理
-            print("メッセージ受信：response.audio_transcript_done")
-            socketio.emit('status_message', {'message': 'ユーザーの音声認識が完了しました。'})
+        # ★ 変更：正しいイベント名はドット区切り（done）を扱う
+        elif msg_type == "response.audio_transcript.done":
+            # ここで AI 側の確定テキストをまとめて UI に出す
+            final_ai_text = ai_transcription_buffer
+            ai_transcription_buffer = ""
+            print("メッセージ受信：response.audio_transcript.done")
+            socketio.emit('ai_message', {'message': final_ai_text})
+            last_ai_message = final_ai_text  # AIの最後のメッセージを記録
+            socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'})
         
         else:
             print(f"メッセージ受信：{msg_type}")
@@ -249,8 +262,6 @@ def record_audio(ws):
             try:
                 # マイクからの音声データを取得
                 data = stream.read(chunk_size, exception_on_overflow=False)
-                # user_message += f"chunk-{_}"  # 仮テキスト
-                
                 # numpy配列に変換
                 audio_data = np.frombuffer(data, dtype=np.int16)
                 
