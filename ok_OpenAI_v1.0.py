@@ -73,6 +73,9 @@ async def receive_messages(websocket):
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=24000, output=True)
 
+
+    conversaition_list = []
+
     # 無限ループで動作
     while True:
         # サーバーからの応答を受信
@@ -89,7 +92,18 @@ async def receive_messages(websocket):
             delta = base64.b64decode(delta)
             stream.write(delta)
         else:
-            print(f"メッセージ受信：{message_data.get('type')}")
+            if not str(message_data.get("transcript")) == "None":
+                # UserかAIかの判断処理
+                if str(message_data.get("type")) == "response.audio_transcript.done":
+                    # AI
+                    print(f"AI：{message_data.get('transcript')}")
+                    conversaition_list.append(f"AI：{message_data.get('transcript')}")
+                else:
+                    # User
+                    print(f"User：{message_data.get('transcript')}")
+                    conversaition_list.append(f"User：{message_data.get('transcript')}")
+
+    print(str(conversaition_list))
 
     stream.stop_stream()
     stream.close()
