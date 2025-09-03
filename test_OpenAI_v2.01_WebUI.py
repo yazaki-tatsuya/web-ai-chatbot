@@ -310,7 +310,7 @@ def start_websocket():
         f"Authorization: Bearer {key}" ,
         "OpenAI-Beta: realtime=v1",
     ]
-    websocket.enableTrace(True)  # デバッグログを有効にする
+    # websocket.enableTrace(True)  # デバッグログを無効化
     
     with ws_lock:
         if ws_connection is not None:
