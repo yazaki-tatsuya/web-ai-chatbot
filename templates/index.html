@@ -99,14 +99,38 @@
             }, duration);
         }
 
-        // ユーザーの発言を表示する関数
-        function addUserMessage(message) {
+        const messages = [];
+
+        function insertMessage(role, text, timestamp) {
             const chat = document.getElementById('chat');
             const msgDiv = document.createElement('div');
-            msgDiv.className = 'message user';
-            msgDiv.textContent = message;
-            chat.appendChild(msgDiv);
+            msgDiv.className = 'message ' + role;
+            msgDiv.textContent = text;
+
+            const msg = { role: role, text: text, timestamp: timestamp || Date.now() };
+            messages.push(msg);
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            // DOM内のどこに挿入すべきか探す
+            const children = Array.from(chat.children);
+            let inserted = false;
+            for (let i = 0; i < children.length; i++) {
+                const existingText = children[i].textContent;
+                const matching = messages.find(m => m.text === existingText);
+                if (matching && matching.timestamp > msg.timestamp) {
+                    chat.insertBefore(msgDiv, children[i]);
+                    inserted = true;
+                    break;
+                }
+            }
+            if (!inserted) {
+                chat.appendChild(msgDiv);
+            }
             chat.scrollTop = chat.scrollHeight;
+        }
+
+        function addUserMessage(message, timestamp) {
+            insertMessage('user', message, timestamp);
             console.log('ユーザーのメッセージを追加しました:', message);
         }
 
@@ -116,6 +140,7 @@
             const msgDiv = document.createElement('div');
             msgDiv.className = 'message ai';
             msgDiv.textContent = message;
+
             chat.appendChild(msgDiv);
             chat.scrollTop = chat.scrollHeight;
             console.log('AIのメッセージを追加しました:', message);
@@ -140,26 +165,18 @@
         });
 
         socket.on('user_message', (data) => {
-            const chat = document.getElementById('chat');
-            const msgDiv = document.createElement('div');
-            msgDiv.className = 'message user';
-            msgDiv.textContent = data.message;
-            chat.appendChild(msgDiv);
-            chat.scrollTop = chat.scrollHeight;
             console.log('ユーザーのメッセージ:', data.message);
-            addUserMessage(data.message);
+            addUserMessage(data.message, data.timestamp);
         });
 
         socket.on('ai_message', (data) => {
             console.log('AIのメッセージ:', data.message);
             // AIメッセージがオブジェクトの場合は、テキストを抽出
             if (typeof data.message === 'object' && data.message !== null) {
-                // 必要に応じて適切なフィールドを抽出
-                // 例: { type: 'audio', transcript: '...' }
                 const transcript = data.message.transcript || JSON.stringify(data.message);
-                addAIMessage(transcript);
+                addAIMessage(transcript, data.timestamp);
             } else {
-                addAIMessage(data.message);
+                addAIMessage(data.message, data.timestamp);
             }
         });
 
