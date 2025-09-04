@@ -44,11 +44,14 @@ user_transcription_buffer = ""
 # AIの最後の応答を記録する変数
 last_ai_message = ""
 
+# 会話のターンを管理（ユーザー→AIで1ターン）
+current_turn = 0
+
 # ★ 追加：AI出力音声の文字起こし用バッファ（最小修正）
 ai_transcription_buffer = ""
 
 def on_message(ws, message):
-    global user_transcription_buffer, last_ai_message, ai_transcription_buffer
+    global user_transcription_buffer, last_ai_message, ai_transcription_buffer, current_turn
     try:
         message_data = json.loads(message)
         msg_type = message_data.get("type")
@@ -60,8 +63,7 @@ def on_message(ws, message):
         elif msg_type == "response.text.final":
             final_text = message_data.get("text")
             print(f"AIの応答（text.final）: {final_text}")
-            socketio.emit('ai_message', {'message': final_text, 'timestamp': time.time()})
-            last_ai_message = final_text  # AIの最後のメッセージを記録
+            # text.final ではAI応答をemitしない（順序安定化のためaudio_transcript.doneのみemit）
         
         elif msg_type == "response.content_part.done":
             # content あるいは part の中に output_text が入ってくるケースを想定（最小限の頑健化）
@@ -73,15 +75,15 @@ def on_message(ws, message):
                 text_or_transcript = str(content)
             print(f"AIの応答（content_part.done）: {text_or_transcript}")
             if text_or_transcript:
-                socketio.emit('ai_message', {'message': text_or_transcript, 'timestamp': time.time()})
-                last_ai_message = text_or_transcript  # AIの最後のメッセージを記録
+                # 部分出力はここでは送らずバッファに貯めるのみ（順序安定化のため）
+                ai_transcription_buffer += text_or_transcript
+                # last_ai_message = text_or_transcript
         
         elif msg_type == "audio":
             transcript = message_data.get("transcript")
             if transcript:
                 print(f"AIの応答（audio）: {transcript}")
-                socketio.emit('ai_message', {'message': transcript, 'timestamp': time.time()})
-                last_ai_message = transcript  # AIの最後のメッセージを記録
+                # audio ではAI応答をemitしない（順序安定化のためaudio_transcript.doneのみemit）
         
         # ★ 変更：AI出力音声の逐次文字起こしは AI 側のバッファに積む
         elif msg_type == "response.audio_transcript.delta":
@@ -93,23 +95,41 @@ def on_message(ws, message):
         # ユーザーの発言（仮定）
         elif msg_type == "user.transcription":
             transcription = message_data.get("transcription")
-            print(f"ユーザーの発言: {transcription}")
-            if transcription:
-                socketio.emit('user_message', {'message': transcription, 'timestamp': time.time()})
+            print(f"ユーザーの発言(途中): {transcription}")
+            # 中間イベントのため表示しない
 
         elif msg_type == "input_audio_buffer.committed":
             transcription = message_data.get("transcription")
-            print(f"ユーザーの発言（完了）: {transcription}")
-            if transcription:
-                socketio.emit('user_message', {'message': transcription, 'timestamp': time.time()})
+            print(f"ユーザーの発言（committed中間）: {transcription}")
+            # 中間イベントのため表示しない
 
         elif msg_type == "conversation.item.input_audio_transcription.completed":
             print("#################################")
             print(message_data)
             # ユーザーの発言を送信
             transcript = message_data.get("transcript")
-            if transcript:
-                socketio.emit('user_message', {'message': transcript})
+            import re
+            def is_valid_japanese(text):
+                # ひらがな・カタカナ・漢字が1文字以上含まれる
+                return bool(re.search(r'[\u3040-\u30FF\u4E00-\u9FFF]', text or ""))
+            # transcriptが空/短すぎ/日本語以外の場合は無視
+            if transcript and len(transcript) > 2 and is_valid_japanese(transcript):
+                current_turn += 1
+                socketio.emit('user_message', {'message': transcript, 'turn': current_turn})
+                # ユーザー発話が確定したタイミングでAI応答をリクエスト
+                system_prompt = "話者の特定や識別は不要です。発話内容のみをもとに応答してください。"
+                instructions = f"{system_prompt}\n{transcript}"
+                response_create = {
+                    "type": "response.create",
+                    "response": {
+                        "modalities": ["text","audio"],
+                        "instructions": instructions
+                    }
+                }
+                ws.send(json.dumps(response_create))
+            else:
+                print(f"transcript無効: {transcript}")
+                print("response.create をユーザー発話に応じて送信しました。")
             # transcriptがない場合は何も送信しない（不要な吹き出し防止）
 
         elif msg_type == "conversation.item.created":
@@ -138,7 +158,7 @@ def on_message(ws, message):
             final_ai_text = ai_transcription_buffer
             ai_transcription_buffer = ""
             print("メッセージ受信：response.audio_transcript.done")
-            socketio.emit('ai_message', {'message': final_ai_text})
+            socketio.emit('ai_message', {'message': final_ai_text, 'turn': current_turn})
             last_ai_message = final_ai_text  # AIの最後のメッセージを記録
             socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'})
         
