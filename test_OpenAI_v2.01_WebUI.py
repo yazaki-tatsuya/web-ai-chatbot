@@ -21,7 +21,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # OpenAI用の環境変数取得
 key = env_production.get_env_variable("OPENAI_API_KEY")
-url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17"
+# url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17"
+url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
 @app.route('/')
 def index():
@@ -190,7 +191,7 @@ def on_open(ws):
         "session": {
             "modalities": ["text","audio"],
             "input_audio_format": "pcm16",
-            "instructions": "Make transcription from my speech",
+            "instructions": "ユーザーを支援します。一回の応答は短く簡潔に。",
             "turn_detection": {
                 "type": "server_vad",
                 "threshold": 0.5,
@@ -229,7 +230,7 @@ def on_open(ws):
 def play_audio_worker():
     """音声データをキューから取り出し、再生するワーカースレッド"""
     p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16, channels=1, rate=24000, output=True)
+    stream = p.open(format=pyaudio.paInt16, channels=2, rate=24000, output=True)
     print("音声再生を開始しました。")
     socketio.emit('status_message', {'message': "音声再生を開始しました。"})
     
@@ -238,7 +239,12 @@ def play_audio_worker():
             audio_data = audio_receive_queue.get()
             if audio_data is None:
                 break  # 終了信号
-            stream.write(audio_data)
+            # モノラル→ステレオ変換
+            audio_np = np.frombuffer(audio_data, dtype=np.int16)
+            right_np = (audio_np * 0.5).astype(np.int16)
+            stereo_np = np.stack([audio_np, right_np], axis=1).flatten()
+            stereo_bytes = stereo_np.tobytes()
+            stream.write(stereo_bytes)
         except Exception as e:
             print(f"音声再生エラー: {e}")
             socketio.emit('status_message', {'message': f"音声再生エラー: {e}"})
@@ -375,3 +381,4 @@ def handle_disconnect():
 if __name__ == "__main__":
     # Flask-SocketIOでサーバーを起動
     socketio.run(app, host='0.0.0.0', port=5000)
+
