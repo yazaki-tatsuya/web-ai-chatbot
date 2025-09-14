@@ -74,6 +74,12 @@
             height: 100%;
         }
     </style>
+    <style>
+        /* interim仮認識の吹き出しを薄色に */
+        .user.user-interim {
+            opacity: 0.5;
+        }
+    </style>
 </head>
 <body>
     <!-- AIアバター表示エリア -->
@@ -129,9 +135,24 @@
             chat.scrollTop = chat.scrollHeight;
         }
 
-        function addUserMessage(message, timestamp) {
-            insertMessage('user', message, timestamp);
-            console.log('ユーザーのメッセージを追加しました:', message);
+        // turn番号・interim対応
+        function addUserMessage(message, turn, interim) {
+            const chat = document.getElementById('chat');
+            let msgDiv = chat.querySelector('.message.user[data-turn="' + turn + '"]');
+            if (!msgDiv) {
+                msgDiv = document.createElement('div');
+                msgDiv.className = 'message user';
+                msgDiv.setAttribute('data-turn', turn);
+                chat.appendChild(msgDiv);
+            }
+            msgDiv.textContent = message;
+            if (interim) {
+                msgDiv.classList.add('user-interim');
+            } else {
+                msgDiv.classList.remove('user-interim');
+            }
+            chat.scrollTop = chat.scrollHeight;
+            console.log('ユーザーのメッセージを追加しました:', message, 'turn:', turn, 'interim:', interim);
         }
 
         // AIの応答を表示する関数
@@ -140,7 +161,6 @@
             const msgDiv = document.createElement('div');
             msgDiv.className = 'message ai';
             msgDiv.textContent = message;
-
             chat.appendChild(msgDiv);
             chat.scrollTop = chat.scrollHeight;
             console.log('AIのメッセージを追加しました:', message);
@@ -165,8 +185,8 @@
         });
 
         socket.on('user_message', (data) => {
-            console.log('ユーザーのメッセージ:', data.message);
-            addUserMessage(data.message, data.timestamp);
+            console.log('ユーザーのメッセージ:', data.message, 'turn:', data.turn, 'interim:', data.interim);
+            addUserMessage(data.message, data.turn || 0, data.interim || false);
         });
 
         socket.on('ai_message', (data) => {

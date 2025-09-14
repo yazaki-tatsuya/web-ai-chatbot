@@ -102,8 +102,10 @@ def on_message(ws, message):
         elif msg_type == "input_audio_buffer.committed":
             transcription = message_data.get("transcription")
             print(f"ユーザーの発言（committed中間）: {transcription}")
-            # 中間イベントのため表示しない
-
+            # interim認識（仮メッセージ）も即時送信
+            if transcription and len(transcription) > 2:
+                current_turn += 1
+                socketio.emit('user_message', {'message': transcription, 'turn': current_turn, 'interim': True})
         elif msg_type == "conversation.item.input_audio_transcription.completed":
             print("#################################")
             print(message_data)
@@ -118,7 +120,7 @@ def on_message(ws, message):
                 current_turn += 1
                 socketio.emit('user_message', {'message': transcript, 'turn': current_turn})
                 # ユーザー発話が確定したタイミングでAI応答をリクエスト
-                system_prompt = "話者の特定や識別は不要です。発話内容のみをもとに応答してください。"
+                system_prompt = "あなたは親切で有能なアシスタントです。応答は簡潔に。"
                 instructions = f"{system_prompt}\n{transcript}"
                 response_create = {
                     "type": "response.create",
@@ -159,9 +161,12 @@ def on_message(ws, message):
             final_ai_text = ai_transcription_buffer
             ai_transcription_buffer = ""
             print("メッセージ受信：response.audio_transcript.done")
-            socketio.emit('ai_message', {'message': final_ai_text, 'turn': current_turn})
-            last_ai_message = final_ai_text  # AIの最後のメッセージを記録
-            socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'})
+            if final_ai_text and final_ai_text.strip():
+                socketio.emit('ai_message', {'message': final_ai_text, 'turn': current_turn})
+                last_ai_message = final_ai_text  # AIの最後のメッセージを記録
+                socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'})
+            else:
+                print("final_ai_textが空のためai_messageはemitしません")
         
         else:
             print(f"メッセージ受信：{msg_type}")
@@ -196,7 +201,7 @@ def on_open(ws):
                 "type": "server_vad",
                 "threshold": 0.5,
                 "prefix_padding_ms": 300,
-                "silence_duration_ms": 200
+                "silence_duration_ms": 1000  # 1秒無音で発話終了と判定（従来:200ms）
             },
             "input_audio_transcription": {
                 "model": "whisper-1"
