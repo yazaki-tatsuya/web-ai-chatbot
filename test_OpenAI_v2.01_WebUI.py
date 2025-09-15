@@ -2,6 +2,10 @@
 import eventlet
 eventlet.monkey_patch()
 
+import os
+from dotenv import load_dotenv
+load_dotenv()  # .env を読み込む（ローカル用）
+
 import env_production
 import json
 import threading
@@ -20,7 +24,8 @@ app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # OpenAI用の環境変数取得
-key = env_production.get_env_variable("OPENAI_API_KEY")
+# key = env_production.get_env_variable("OPENAI_API_KEY")
+key = os.environ.get("OPEN_AI_KEY")
 # url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17"
 url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
