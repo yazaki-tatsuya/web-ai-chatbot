@@ -32,7 +32,7 @@ steps:
 
   - task: AzureWebApp@1
     inputs:
-      azureSubscription: 'pipeline_web-ai-chatbot'  # ✅ Azure サービスコネクションの名前
+      azureSubscription: 'pipeline_web-ai-chatbot'  # ✅ AzureDevOps サービスコネクションの名前
       appType: 'webAppLinux'
       appName: 'rainbow-web-ai-chatbot'
       package: '$(Build.ArtifactStagingDirectory)/app.zip'
