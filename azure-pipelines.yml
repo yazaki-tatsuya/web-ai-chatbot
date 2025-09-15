@@ -1,0 +1,22 @@
+trigger:
+  branches:
+    include:
+      - main  # ✅ GitHub 側の main ブランチをトリガーにする
+
+resources:
+  repositories:
+    - repository: web-ai-chatbot
+      type: github
+      endpoint: pipeline_web-ai-chatbot
+      name: yazaki-tatsuya/web-ai-chatbot
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  - checkout: web-ai-chatbot  # ✅ 上で定義した GitHub リポジトリをチェックアウト
+
+  - script: |
+      echo "GitHub から取得したコードの内容をビルドや処理できます"
+      ls -la
+    displayName: 'Check out GitHub repo and list files'
