@@ -20,3 +20,20 @@ steps:
       echo "GitHub から取得したコードの内容をビルドや処理できます"
       ls -la
     displayName: 'Check out GitHub repo and list files'
+
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: '$(Build.SourcesDirectory)/web-ai-chatbot'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+      replaceExistingArchive: true
+    displayName: 'ZIPファイル作成'
+
+  - task: AzureWebApp@1
+    inputs:
+      azureSubscription: 'pipeline_web-ai-chatbot'  # ✅ Azure サービスコネクションの名前
+      appType: 'webAppLinux'
+      appName: 'rainbow-web-ai-chatbot'
+      package: '$(Build.ArtifactStagingDirectory)/app.zip'
+    displayName: 'App Service にデプロイ'
