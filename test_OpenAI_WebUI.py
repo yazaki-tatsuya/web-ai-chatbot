@@ -6,7 +6,6 @@ import os
 from dotenv import load_dotenv
 load_dotenv()  # .env を読み込む（ローカル用）
 
-import env_production
 import json
 import threading
 import time
