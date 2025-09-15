@@ -5,11 +5,12 @@
         音声の送受信は別スレッドで行うため、非同期処理を使用しています。
         
 '''
-import env_production
+import os
+from dotenv import load_dotenv
+load_dotenv()  # .env を読み込む（ローカル用）
 import asyncio
 import websockets
 import json
-import os
 
 import pyaudio
 import numpy as np
@@ -17,7 +18,7 @@ import base64
 import time
 
 # OpenAI用
-key = env_production.get_env_variable("OPENAI_API_KEY")
+key = os.environ.get("OPEN_AI_KEY")  # OpenAIのAPIキー
 url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17"
 # url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
 

@@ -1,19 +1,16 @@
-# 矢崎にて個別指定
+# 個別指定
 env.py
 ng_Azure_v0.1_実行不可.py
 ok_OpenAI_v0.1_途切れあり.py
-ok_Azure_v1.0.py
-ok_Azure_v1.1.py
-test_Azure_v2.0_WebUI.py
-test_Azure_v2.01_WebUI.py
-進捗_20250119_バグはあるもrealtime-apiでブラウザ会話.mp4
-env_production.py
-index_bkup20250316.html
-ok_Azure_v1.1_sequence.md
+ok_Azure_*
+test_Azure_*.py
+interview.html
+style.css
+index_bkup*.html
 ai_avatar*.png
-RP-IT00*.xlsx
-vector*.pkl
+RP*
 参考
+進捗_20250119_バグはあるもrealtime-apiでブラウザ会話.mp4
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
