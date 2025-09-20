@@ -8,10 +8,10 @@ load_dotenv()  # .env を読み込む（ローカル用）
 
 import json
 import threading
-import time
+# import time
 import base64
-import pyaudio
-import numpy as np
+# import pyaudio
+# import numpy as np
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 import websocket
@@ -74,7 +74,6 @@ def on_message(ws, message):
             # content あるいは part の中に output_text が入ってくるケースを想定（最小限の頑健化）
             content = message_data.get("content") or message_data.get("part")
             if isinstance(content, dict):
-                # output_text のときは text、音声のときは transcript が入る可能性を想定
                 text_or_transcript = content.get("text") or content.get("transcript") or ""
             else:
                 text_or_transcript = str(content)
@@ -82,7 +81,6 @@ def on_message(ws, message):
             if text_or_transcript:
                 # 部分出力はここでは送らずバッファに貯めるのみ（順序安定化のため）
                 ai_transcription_buffer += text_or_transcript
-                # last_ai_message = text_or_transcript
         
         elif msg_type == "audio":
             transcript = message_data.get("transcript")
@@ -154,11 +152,28 @@ def on_message(ws, message):
         # -----------------------------------------------
 
         elif msg_type == "response.audio.delta":
-            # 音声データの処理（必要に応じて）
+            # 音声データ（PCM）にWAVヘッダを付与してクライアントに送信
             delta = message_data.get("delta")
-            audio_data = base64.b64decode(delta)
-            audio_receive_queue.put(audio_data)
-        
+            if delta:
+                try:
+                    import binascii
+                    audio_data = base64.b64decode(delta)
+                    print("audio delta head (hex):", binascii.hexlify(audio_data[:16]))
+                    # WAVヘッダ付与（PCM 16bit, 1ch, 16000Hz仮定）
+                    def pcm_to_wav(pcm_bytes, sample_rate=16000, bits=16, channels=1):
+                        import struct
+                        byte_rate = sample_rate * channels * bits // 8
+                        block_align = channels * bits // 8
+                        wav_header = b'RIFF' + struct.pack('<I', 36 + len(pcm_bytes)) + b'WAVEfmt '
+                        wav_header += struct.pack('<IHHIIHH', 16, 1, channels, sample_rate, byte_rate, block_align, bits)
+                        wav_header += b'data' + struct.pack('<I', len(pcm_bytes))
+                        return wav_header + pcm_bytes
+                    wav_bytes = pcm_to_wav(audio_data)
+                    wav_b64 = base64.b64encode(wav_bytes).decode('ascii')
+                    socketio.emit('ai_audio', {'audio': wav_b64})
+                except Exception as e:
+                    print("audio delta decode error:", e)
+            # audio_receive_queue.put(audio_data)  # サーバー側再生は不要
         # ★ 変更：正しいイベント名はドット区切り（done）を扱う
         elif msg_type == "response.audio_transcript.done":
             # ここで AI 側の確定テキストをまとめて UI に出す
@@ -236,37 +251,13 @@ def on_open(ws):
     # 録音開始スレッドを起動
     threading.Thread(target=record_audio, args=(ws,), daemon=True).start()
 
+# 音声データをキューから取得して再生するワーカー
 def play_audio_worker():
-    """音声データをキューから取り出し、再生するワーカースレッド"""
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16, channels=2, rate=24000, output=True)
-    print("音声再生を開始しました。")
-    socketio.emit('status_message', {'message': "音声再生を開始しました。"})
-    
-    while True:
-        try:
-            audio_data = audio_receive_queue.get()
-            if audio_data is None:
-                break  # 終了信号
-            # モノラル→ステレオ変換
-            audio_np = np.frombuffer(audio_data, dtype=np.int16)
-            right_np = (audio_np * 0.5).astype(np.int16)
-            stereo_np = np.stack([audio_np, right_np], axis=1).flatten()
-            stereo_bytes = stereo_np.tobytes()
-            stream.write(stereo_bytes)
-        except Exception as e:
-            print(f"音声再生エラー: {e}")
-            socketio.emit('status_message', {'message': f"音声再生エラー: {e}"})
-            break
-    
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    print("音声再生を終了しました。")
-    socketio.emit('status_message', {'message': "音声再生を終了しました。"})
+    print("pyaudioは未使用のため、play_audio_workerは実行されません。")
+    socketio.emit('status_message', {'message': "pyaudioは未使用のため、play_audio_workerは実行されません。"})
 
+# 音声データをキューに追加する関数
 def play_audio(audio_data):
-    """キューに音声データを追加"""
     audio_receive_queue.put(audio_data)
 
 '''
@@ -282,64 +273,9 @@ def play_audio(audio_data):
         録音が終了した場合は、サーバーに録音終了を通知します。
 '''
 def record_audio(ws):
-    try:
-        p = pyaudio.PyAudio()
-        # マイクからの音声を取得するための設定
-        sample_rate = 24000  # 24kHz
-        chunk_size = 2400     # マイクからの入力データのチャンクサイズ
-        format = pyaudio.paInt16  # PCM16形式
-        channels = 1          # モノラル
+    print("pyaudioは未使用のため、record_audioは実行されません。")
+    socketio.emit('status_message', {'message': "pyaudioは未使用のため、record_audioは実行されません。"})
 
-        stream = p.open(format=format,
-                        channels=channels,
-                        rate=sample_rate,
-                        input=True,
-                        frames_per_buffer=chunk_size)
-        print("マイクからの録音を開始しました。")
-        socketio.emit('status_message', {'message': "マイクからの録音を開始しました。"})
-        # チャンクカウンター
-        chunk_counter = 0        
-        while True:
-            try:
-                # マイクからの音声データを取得
-                data = stream.read(chunk_size, exception_on_overflow=False)
-                # numpy配列に変換
-                audio_data = np.frombuffer(data, dtype=np.int16)
-                
-                # base64形式にエンコード
-                base64_audio = base64.b64encode(audio_data.tobytes()).decode('utf-8')
-                chunk_counter += 1
-                # サーバーに音声データを送信（チャンクごとに送信）
-                input_audio = {
-                    "type": "input_audio_buffer.append",
-                    "audio": base64_audio
-                }
-                ws.send(json.dumps(input_audio))
-                print(f"音声チャンクを送信：{chunk_counter}")
-                # 音声チャンクを送信したことを通知するイベント
-                socketio.emit('status_message', {'message': "音声チャンクを送信しました。"})
-                
-                # サーバーがチャンクを処理するために少し待機
-                time.sleep(0.1)
-            except Exception as e:
-                print(f"録音エラー: {e}")
-                socketio.emit('status_message', {'message': f"録音エラー: {e}"})
-                break
-
-        # 録音終了
-        stream.stop_stream()  # マイクストリームを停止
-        stream.close()        # マイクストリームをクローズ
-        p.terminate()         # PyAudioを終了
-
-        print("録音を終了しました。")
-        socketio.emit('status_message', {'message': "録音を終了しました。"})
-        
-        # 以下はサーバー側がストリーム終了を自動検知する場合は不要
-        # commit_message = {"type": "input_audio_buffer.commit"}
-        # ws.send(json.dumps(commit_message))
-    except Exception as e:
-        print(f"録音スレッドエラー: {e}")
-        socketio.emit('status_message', {'message': f"録音スレッドエラー: {e}"})
 
 def start_websocket():
     global ws_connection
