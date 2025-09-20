@@ -8,7 +8,7 @@ resources:
     - repository: web-ai-chatbot
       type: github
       endpoint: yazaki-tatsuya   # STEP3 で作成した GitHub 接続名
-      name: yazaki-tatsuya/web-ai-chatbott  # GitHub のユーザー名/リポジトリ名
+      name: yazaki-tatsuya/web-ai-chatbot  # GitHub のユーザー名/リポジトリ名
 
 pool:
   vmImage: 'ubuntu-latest'
