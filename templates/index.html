@@ -178,6 +178,9 @@
             console.log('ステータスメッセージを追加しました:', message);
         }
 // AI音声データ受信＆再生
+let isAudioPlaying = false;
+let audioQueue = [];
+
 socket.on('ai_audio', function(data) {
     // base64データをArrayBufferに変換
     const base64 = data.audio;
@@ -190,12 +193,28 @@ socket.on('ai_audio', function(data) {
     // Blobを生成（WAV/PCM想定。必要に応じてMIME typeを変更）
     const blob = new Blob([bytes], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
+
+    // 再生中ならキューに追加
+    if (isAudioPlaying) {
+        audioQueue.push(url);
+        return;
+    }
+
     // Audio要素で再生
     const audio = new Audio(url);
+    isAudioPlaying = true;
     audio.play();
-    // 再生後にURLを解放
+    // 再生後にURLを解放し、次の音声があれば再生
     audio.onended = () => {
         URL.revokeObjectURL(url);
+        isAudioPlaying = false;
+        if (audioQueue.length > 0) {
+            const nextUrl = audioQueue.shift();
+            const nextAudio = new Audio(nextUrl);
+            isAudioPlaying = true;
+            nextAudio.play();
+            nextAudio.onended = audio.onended;
+        }
     };
 });
 
