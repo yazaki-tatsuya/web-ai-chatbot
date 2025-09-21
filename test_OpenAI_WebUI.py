@@ -60,8 +60,14 @@ def on_message(ws, message):
     try:
         message_data = json.loads(message)
         msg_type = message_data.get("type")
-        
-        if msg_type == "response.done":
+
+        # --- errorメッセージを詳細に出力・フロントにも通知 ---
+        if msg_type == "error":
+            print("メッセージ受信：error")
+            print("エラー内容:", message_data)
+            socketio.emit('status_message', {'message': f"AIサーバーエラー: {message_data}"})
+
+        elif msg_type == "response.done":
             print("メッセージ受信：response.done")
             socketio.emit('status_message', {'message': 'AIの応答が完了しました。'})
         
@@ -94,6 +100,14 @@ def on_message(ws, message):
             ai_transcription_buffer += delta
             print(f"AIの応答（audio_transcript.delta）: {delta}")
             # 部分はまだ送らず、確定でまとめて送る
+
+        # AIの応答が確定したタイミングでUIに送信
+        elif msg_type == "response.audio_transcript.done":
+            transcript = ai_transcription_buffer
+            ai_transcription_buffer = ""
+            print(f"AIの応答（audio_transcript.done）: {transcript}")
+            if transcript:
+                socketio.emit('ai_message', {'message': transcript})
 
         # ユーザーの発言（仮定）
         elif msg_type == "user.transcription":
