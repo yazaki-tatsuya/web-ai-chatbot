@@ -37,6 +37,7 @@ def init_client_state(sid):
         "last_ai_message": "",
         "current_turn": 0,
         "ai_transcription_buffer": "",
+        "audio_pcm_buffer": bytearray(),  # AI音声PCMバッファを初期化
     }
 
 def cleanup_client_state(sid):
@@ -147,19 +148,8 @@ def on_message(ws, message, sid):
                     import binascii
                     audio_data = base64.b64decode(delta)
                     print("audio delta head (hex):", binascii.hexlify(audio_data[:16]))
-                    def pcm_to_wav(pcm_bytes, sample_rate=24000, channels=1):
-                        import io
-                        import wave
-                        with io.BytesIO() as wav_buffer:
-                            with wave.open(wav_buffer, "wb") as wav_file:
-                                wav_file.setnchannels(channels)
-                                wav_file.setsampwidth(2)  # 16bit
-                                wav_file.setframerate(sample_rate)
-                                wav_file.writeframes(pcm_bytes)
-                            return wav_buffer.getvalue()
-                    wav_bytes = pcm_to_wav(audio_data)
-                    wav_b64 = base64.b64encode(wav_bytes).decode('ascii')
-                    socketio.emit('audio_data', {'audio': wav_b64}, room=sid)
+                    # PCMをバッファにappendのみ
+                    state["audio_pcm_buffer"] += audio_data
                 except Exception as e:
                     print("audio delta decode error:", e)
 
@@ -176,6 +166,28 @@ def on_message(ws, message, sid):
                 socketio.emit('ai_message', {'message': '（無応答）', 'turn': state["current_turn"]}, room=sid)
                 print("final_ai_textが空のためダミーai_messageをemitしました")
 
+        elif msg_type == "response.audio.done":
+            # バッファにたまったPCMをWAV化してemit
+            pcm_bytes = state["audio_pcm_buffer"]
+            if pcm_bytes:
+                try:
+                    def pcm_to_wav(pcm_bytes, sample_rate=24000, channels=1):
+                        import io
+                        import wave
+                        with io.BytesIO() as wav_buffer:
+                            with wave.open(wav_buffer, "wb") as wav_file:
+                                wav_file.setnchannels(channels)
+                                wav_file.setsampwidth(2)  # 16bit
+                                wav_file.setframerate(sample_rate)
+                                wav_file.writeframes(pcm_bytes)
+                            return wav_buffer.getvalue()
+                    wav_bytes = pcm_to_wav(pcm_bytes)
+                    wav_b64 = base64.b64encode(wav_bytes).decode('ascii')
+                    socketio.emit('audio_data', {'audio': wav_b64}, room=sid)
+                except Exception as e:
+                    print("audio done decode error:", e)
+            # バッファクリア
+            state["audio_pcm_buffer"] = bytearray()
         else:
             print(f"メッセージ受信：{msg_type}")
             socketio.emit('status_message', {'message': f"メッセージ受信：{msg_type}"}, room=sid)
