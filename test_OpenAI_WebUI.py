@@ -79,6 +79,8 @@ def on_message(ws, message, sid):
             print(f"AIの応答（content_part.done）: {text_or_transcript}")
             if text_or_transcript:
                 state["ai_transcription_buffer"] += text_or_transcript
+                # AI吹き出しを即時emit
+                socketio.emit('ai_message', {'message': text_or_transcript}, room=sid)
 
         elif msg_type == "audio":
             transcript = message_data.get("transcript")
@@ -92,11 +94,11 @@ def on_message(ws, message, sid):
             print(f"AIの応答（audio_transcript.delta）: {delta}")
 
         elif msg_type == "response.audio_transcript.done":
+            # emitは下の162行目側でのみ行う（ここではバッファクリアのみ）
             transcript = state["ai_transcription_buffer"]
             state["ai_transcription_buffer"] = ""
             print(f"AIの応答（audio_transcript.done）: {transcript}")
-            if transcript:
-                socketio.emit('ai_message', {'message': transcript}, room=sid)
+            # emitしない
 
         elif msg_type == "user.transcription":
             transcription = message_data.get("transcription")
@@ -145,17 +147,19 @@ def on_message(ws, message, sid):
                     import binascii
                     audio_data = base64.b64decode(delta)
                     print("audio delta head (hex):", binascii.hexlify(audio_data[:16]))
-                    def pcm_to_wav(pcm_bytes, sample_rate=16000, bits=16, channels=1):
-                        import struct
-                        byte_rate = sample_rate * channels * bits // 8
-                        block_align = channels * bits // 8
-                        wav_header = b'RIFF' + struct.pack('<I', 36 + len(pcm_bytes)) + b'WAVEfmt '
-                        wav_header += struct.pack('<IHHIIHH', 16, 1, channels, sample_rate, byte_rate, block_align, bits)
-                        wav_header += b'data' + struct.pack('<I', len(pcm_bytes))
-                        return wav_header + pcm_bytes
+                    def pcm_to_wav(pcm_bytes, sample_rate=24000, channels=1):
+                        import io
+                        import wave
+                        with io.BytesIO() as wav_buffer:
+                            with wave.open(wav_buffer, "wb") as wav_file:
+                                wav_file.setnchannels(channels)
+                                wav_file.setsampwidth(2)  # 16bit
+                                wav_file.setframerate(sample_rate)
+                                wav_file.writeframes(pcm_bytes)
+                            return wav_buffer.getvalue()
                     wav_bytes = pcm_to_wav(audio_data)
                     wav_b64 = base64.b64encode(wav_bytes).decode('ascii')
-                    socketio.emit('ai_audio', {'audio': wav_b64}, room=sid)
+                    socketio.emit('audio_data', {'audio': wav_b64}, room=sid)
                 except Exception as e:
                     print("audio delta decode error:", e)
 
@@ -168,7 +172,9 @@ def on_message(ws, message, sid):
                 state["last_ai_message"] = final_ai_text
                 socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'}, room=sid)
             else:
-                print("final_ai_textが空のためai_messageはemitしません")
+                # 空でもダミーで吹き出しを出す
+                socketio.emit('ai_message', {'message': '（無応答）', 'turn': state["current_turn"]}, room=sid)
+                print("final_ai_textが空のためダミーai_messageをemitしました")
 
         else:
             print(f"メッセージ受信：{msg_type}")
