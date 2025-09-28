@@ -147,14 +147,16 @@ def on_message(ws, message, sid):
                     import binascii
                     audio_data = base64.b64decode(delta)
                     print("audio delta head (hex):", binascii.hexlify(audio_data[:16]))
-                    def pcm_to_wav(pcm_bytes, sample_rate=16000, bits=16, channels=1):
-                        import struct
-                        byte_rate = sample_rate * channels * bits // 8
-                        block_align = channels * bits // 8
-                        wav_header = b'RIFF' + struct.pack('<I', 36 + len(pcm_bytes)) + b'WAVEfmt '
-                        wav_header += struct.pack('<IHHIIHH', 16, 1, channels, sample_rate, byte_rate, block_align, bits)
-                        wav_header += b'data' + struct.pack('<I', len(pcm_bytes))
-                        return wav_header + pcm_bytes
+                    def pcm_to_wav(pcm_bytes, sample_rate=24000, channels=1):
+                        import io
+                        import wave
+                        with io.BytesIO() as wav_buffer:
+                            with wave.open(wav_buffer, "wb") as wav_file:
+                                wav_file.setnchannels(channels)
+                                wav_file.setsampwidth(2)  # 16bit
+                                wav_file.setframerate(sample_rate)
+                                wav_file.writeframes(pcm_bytes)
+                            return wav_buffer.getvalue()
                     wav_bytes = pcm_to_wav(audio_data)
                     wav_b64 = base64.b64encode(wav_bytes).decode('ascii')
                     socketio.emit('audio_data', {'audio': wav_b64}, room=sid)
