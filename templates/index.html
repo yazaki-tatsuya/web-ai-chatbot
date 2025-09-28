@@ -5,7 +5,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>AIチャットインターフェース</title>
+    <title>AIチャットインターフェース2</title>
     <!-- integrity 属性を削除 -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script>
     <style>
@@ -105,6 +105,14 @@
             }, duration);
         }
 
+        // AI応答を受信して赤い吹き出しを表示
+        socket.on('ai_message', (data) => {
+            if (data && data.message) {
+                insertMessage('ai', data.message);
+                animateAvatarForText(data.message);
+            }
+        });
+
         const messages = [];
 
         function insertMessage(role, text, timestamp) {
@@ -177,6 +185,27 @@
             status.scrollTop = status.scrollHeight;
             console.log('ステータスメッセージを追加しました:', message);
         }
+// AI音声データ受信＆再生
+socket.on('ai_audio', function(data) {
+    // base64データをArrayBufferに変換
+    const base64 = data.audio;
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    // Blobを生成（WAV/PCM想定。必要に応じてMIME typeを変更）
+    const blob = new Blob([bytes], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    // Audio要素で再生
+    const audio = new Audio(url);
+    audio.play();
+    // 再生後にURLを解放
+    audio.onended = () => {
+        URL.revokeObjectURL(url);
+    };
+});
 
         socket.on('connect', () => {
             console.log('サーバーに接続しました。');

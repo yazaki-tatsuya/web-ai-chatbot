@@ -13,6 +13,8 @@ RP*
 進捗_20250119_バグはあるもrealtime-apiでブラウザ会話.mp4
 azure-pipelines*.md
 
+*old*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
