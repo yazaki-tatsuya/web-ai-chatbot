@@ -7,8 +7,8 @@ resources:
   repositories:
     - repository: web-ai-chatbot
       type: github
-      endpoint: pipeline_web-ai-chatbot
-      name: yazaki-tatsuya/web-ai-chatbot
+      endpoint: yazaki-tatsuya   # STEP3 で作成した GitHub 接続名
+      name: yazaki-tatsuya/web-ai-chatbot  # GitHub のユーザー名/リポジトリ名
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -23,7 +23,7 @@ steps:
 
   - task: ArchiveFiles@2
     inputs:
-      rootFolderOrFile: '$(Build.SourcesDirectory)/web-ai-chatbot'
+      rootFolderOrFile: '$(Build.SourcesDirectory)'
       includeRootFolder: false
       archiveType: 'zip'
       archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
@@ -32,8 +32,8 @@ steps:
 
   - task: AzureWebApp@1
     inputs:
-      azureSubscription: 'pipeline_web-ai-chatbot'  # ✅ Azure サービスコネクションの名前
+      azureSubscription: 'pipeline_web-ai-chatbot'  # STEP4 で作成した Azure 接続名
       appType: 'webAppLinux'
-      appName: 'rainbow-web-ai-chatbot'
+      appName: 'rainbow-web-ai-chatbot'  # Azure App Service の名前
       package: '$(Build.ArtifactStagingDirectory)/app.zip'
     displayName: 'App Service にデプロイ'
