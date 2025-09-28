@@ -5,7 +5,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>AIチャットインターフェース2</title>
+    <title>AIチャットインターフェース4</title>
     <!-- integrity 属性を削除 -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script>
     <style>
@@ -106,10 +106,10 @@
         }
 
         // AI応答を受信して赤い吹き出しを表示
+        // AIメッセージ受信時は必ずaddAIMessageのみ呼ぶ
         socket.on('ai_message', (data) => {
             if (data && data.message) {
-                insertMessage('ai', data.message);
-                animateAvatarForText(data.message);
+                addAIMessage(data.message);
             }
         });
 
@@ -186,7 +186,7 @@
             console.log('ステータスメッセージを追加しました:', message);
         }
 // AI音声データ受信＆再生
-socket.on('ai_audio', function(data) {
+socket.on('audio_data', function(data) {
     // base64データをArrayBufferに変換
     const base64 = data.audio;
     const binary = atob(base64);
@@ -218,16 +218,7 @@ socket.on('ai_audio', function(data) {
             addUserMessage(data.message, data.turn || 0, data.interim || false);
         });
 
-        socket.on('ai_message', (data) => {
-            console.log('AIのメッセージ:', data.message);
-            // AIメッセージがオブジェクトの場合は、テキストを抽出
-            if (typeof data.message === 'object' && data.message !== null) {
-                const transcript = data.message.transcript || JSON.stringify(data.message);
-                addAIMessage(transcript, data.timestamp);
-            } else {
-                addAIMessage(data.message, data.timestamp);
-            }
-        });
+        // ※上記でai_messageは一本化したので、ここは削除
 
         socket.on('status_message', (data) => {
             console.log('ステータスメッセージ:', data.message);
