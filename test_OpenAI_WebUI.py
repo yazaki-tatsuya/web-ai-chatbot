@@ -285,6 +285,53 @@ def handle_disconnect():
     print(f'クライアントが切断しました: {sid}')
     socketio.emit('status_message', {'message': "クライアントが切断しました。"}, room=sid)
     cleanup_client_state(sid)
+# クライアントから音声データを受信し、OpenAI WebSocketに転送
+@socketio.on('audio_data')
+def handle_audio_data(data):
+    sid = request.sid
+    state = client_states.get(sid)
+    if not state:
+        print(f"状態が見つかりません: {sid}")
+        return
+    ws = state.get("ws_connection")
+    if not ws:
+        print(f"WebSocket接続が存在しません: {sid}")
+        return
+    try:
+        audio_b64 = data.get("audio")
+        if not audio_b64:
+            print("audioデータが空です")
+            return
+        # base64データの長さが極端に短い場合はcommitを送らない
+        import base64 as b64
+        try:
+            audio_bytes = b64.b64decode(audio_b64)
+        except Exception as e:
+            print(f"base64 decode error: {e}")
+            return
+        print(f"受信audioデータ長: {len(audio_bytes)} bytes")
+        socketio.emit('status_message', {'message': f"受信audioデータ長: {len(audio_bytes)} bytes"}, room=sid)
+        if len(audio_bytes) < 1000:  # 100ms相当より小さい場合はスキップ
+            print(f"audioデータが短すぎるためcommitを送信しません（{len(audio_bytes)} bytes）")
+            socketio.emit('status_message', {'message': f"audioデータが短すぎるためcommitを送信しません（{len(audio_bytes)} bytes）"}, room=sid)
+            return
+        # input_audio_buffer.appendを送信
+        input_audio = {
+            "type": "input_audio_buffer.append",
+            "audio": audio_b64
+        }
+        ws.send(json.dumps(input_audio))
+        print("input_audio_buffer.appendを送信しました")
+        # input_audio_buffer.commitも送信
+        commit_msg = {
+            "type": "input_audio_buffer.commit"
+        }
+        ws.send(json.dumps(commit_msg))
+        print("input_audio_buffer.commitを送信しました")
+        socketio.emit('status_message', {'message': "音声データをAIサーバーに送信しました。"}, room=sid)
+    except Exception as e:
+        print(f"音声データ送信エラー: {e}")
+        socketio.emit('status_message', {'message': f"音声データ送信エラー: {e}"}, room=sid)
 
 if __name__ == "__main__":
     socketio.run(app, host='0.0.0.0', port=5000)

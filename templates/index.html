@@ -5,7 +5,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>AIチャットインターフェース6</title>
+    <title>AIチャットインターフェース13</title>
     <!-- integrity 属性を削除 -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script>
     <style>
@@ -105,6 +105,104 @@
         }
         // ページロード時に呼び出す
         initAudio();
+        // 音声録音・送信処理（バッファ空時は送信しないよう修正）
+        let isRecording = false;
+
+        let audioChunks = [];
+        // WAV→PCM16(24kHz, mono, little-endian)変換関数（グローバルスコープに移動）
+        async function wavToPCM16(audioBlob, targetSampleRate = 24000) {
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            // モノラル
+            const rawData = audioBuffer.getChannelData(0);
+            // サンプリングレート変換
+            let resampled;
+            if (audioBuffer.sampleRate !== targetSampleRate) {
+                const ratio = audioBuffer.sampleRate / targetSampleRate;
+                const newLength = Math.floor(rawData.length / ratio);
+                resampled = new Float32Array(newLength);
+                for (let i = 0; i < newLength; i++) {
+                    resampled[i] = rawData[Math.floor(i * ratio)];
+                }
+            } else {
+                resampled = rawData;
+            }
+            // PCM16変換
+            const pcm16 = new Int16Array(resampled.length);
+            for (let i = 0; i < resampled.length; i++) {
+                let s = Math.max(-1, Math.min(1, resampled[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return pcm16;
+        }
+
+        async function startRecordingLoop() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    if (audioChunks.length > 0) {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const pcm16 = await wavToPCM16(audioBlob, 24000);
+                        const uint8Array = new Uint8Array(pcm16.buffer);
+                        let binary = '';
+                        for (let i = 0; i < uint8Array.length; i++) {
+                            binary += String.fromCharCode(uint8Array[i]);
+                        }
+                        const base64Audio = btoa(binary);
+                        // サーバーへ送信
+                        socket.emit('audio_data', { audio: base64Audio });
+                        audioChunks = [];
+                    } else {
+                        // バッファが空なら送信しない
+                        console.log('録音バッファが空のため送信スキップ');
+                    }
+                    // 録音再開
+                    if (isRecording) {
+                        setTimeout(() => {
+                            if (mediaRecorder.state !== 'recording') {
+                                mediaRecorder.start();
+                            }
+                        }, 100);
+                    }
+                };
+
+                // 録音ループ
+                function recordCycle() {
+                    if (mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                }
+
+                // 最初の録音開始
+                isRecording = true;
+                mediaRecorder.start();
+                // 1.5秒ごとに録音停止→onstopで再開
+                recordingInterval = setInterval(recordCycle, 3000);
+
+                window.addEventListener('beforeunload', () => {
+                    isRecording = false;
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                    if (recordingInterval) {
+                        clearInterval(recordingInterval);
+                    }
+                });
+            } catch (err) {
+                console.error('音声録音初期化エラー:', err);
+            }
+        }
+        // ページロード時に録音ループ開始
+        startRecordingLoop();
 
         // AIアバターの口の動きを、テキストの長さに合わせて保持する関数
         function animateAvatarForText(text) {
