@@ -34,6 +34,6 @@ steps:
     inputs:
       azureSubscription: 'pipeline_web-ai-chatbot'  # STEP4 で作成した Azure 接続名
       appType: 'webAppLinux'
-      appName: 'rainbow-web-ai-chatbot'  # Azure App Service の名前
+      appName: 'rainbow-web-ai-chatbot3'
       package: '$(Build.ArtifactStagingDirectory)/app.zip'
     displayName: 'App Service にデプロイ'
