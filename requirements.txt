@@ -1,7 +1,7 @@
 gunicorn
 flask
 flask-socketio
-eventlet
+eventlet>=0.24.1
 websockets
 websocket-client
 requests
