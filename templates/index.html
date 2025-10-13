@@ -5,19 +5,31 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>AIチャットインターフェース13</title>
+    <title>AIチャットインターフェース15</title>
+    <!-- Bootstrap 5.3.0-alpha1 CSS追加 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- integrity 属性を削除 -->
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous"></script>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            background-color: #f0f2f5; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: flex-start; 
-            height: 100vh; 
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
             margin: 0;
+        }
+        #voice-start-btn:disabled {
+            background-color: #b8daff !important;
+            color: #fff !important;
+            border-color: #b8daff !important;
+        }
+        #voice-stop-btn:disabled {
+            background-color: #e2e3e5 !important;
+            color: #aaa !important;
+            border-color: #e2e3e5 !important;
         }
         #chat { 
             width: 80%; 
@@ -88,6 +100,11 @@
     </div>
     <div id="chat"></div>
     <div id="status"></div>
+    <!-- 音声入力コントロール -->
+    <div class="mb-3" style="margin: 10px 0;">
+        <button id="voice-start-btn" class="btn btn-success me-2">話し始める</button>
+        <button id="voice-stop-btn" class="btn btn-danger" disabled>話し終える</button>
+    </div>
 
     <script>
         const socket = io();
@@ -105,10 +122,80 @@
         }
         // ページロード時に呼び出す
         initAudio();
-        // 音声録音・送信処理（バッファ空時は送信しないよう修正）
-        let isRecording = false;
 
+        // 録音ボタン制御
+        const voiceStartBtn = document.getElementById('voice-start-btn');
+        const voiceStopBtn = document.getElementById('voice-stop-btn');
+        let mediaRecorder;
         let audioChunks = [];
+
+        voiceStartBtn.addEventListener('click', async () => {
+            console.log("[UI] 開始ボタン押下");
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                // 状態反映
+                voiceStartBtn.classList.remove('btn-success');
+                voiceStartBtn.classList.add('btn-outline-success');
+                voiceStartBtn.disabled = true;
+                voiceStopBtn.classList.remove('btn-outline-danger');
+                voiceStopBtn.classList.add('btn-danger');
+                voiceStopBtn.disabled = false;
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    console.log("[Media] 停止完了、送信処理開始");
+                    if (audioChunks.length > 0) {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const pcm16 = await wavToPCM16(audioBlob, 24000);
+                        const uint8Array = new Uint8Array(pcm16.buffer);
+                        let binary = "";
+                        const chunkSize = 8192;
+                        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                            const chunk = uint8Array.subarray(i, i + chunkSize);
+                            binary += String.fromCharCode(...chunk);
+                        }
+                        const base64Audio = btoa(binary);
+                        if (uint8Array.length > 500) {
+                            socket.emit('audio_data', { audio: base64Audio });
+                            console.log("[Send] オーディオ送信完了 (Length:", uint8Array.length, ")");
+                        } else {
+                            console.warn("[Skip] オーディオが小さすぎるため送信スキップ");
+                        }
+                        audioChunks = [];
+                    }
+                };
+
+                mediaRecorder.start();
+                console.log("[Media] 録音開始");
+            } catch (error) {
+                console.error("[Error] 録音初期化失敗:", error);
+            }
+        });
+
+        voiceStopBtn.addEventListener('click', () => {
+            console.log("[UI] 停止ボタン押下");
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                console.log("[Media] 録音停止");
+
+                // 状態反映
+                voiceStartBtn.classList.add('btn-success');
+                voiceStartBtn.classList.remove('btn-outline-success');
+                voiceStartBtn.disabled = false;
+                voiceStopBtn.classList.add('btn-outline-danger');
+                voiceStopBtn.classList.remove('btn-danger');
+                voiceStopBtn.disabled = true;
+            }
+        });
+
         // WAV→PCM16(24kHz, mono, little-endian)変換関数（グローバルスコープに移動）
         async function wavToPCM16(audioBlob, targetSampleRate = 24000) {
             const arrayBuffer = await audioBlob.arrayBuffer();
@@ -185,8 +272,8 @@
                 // 最初の録音開始
                 isRecording = true;
                 mediaRecorder.start();
-                // 1.5秒ごとに録音停止→onstopで再開
-                recordingInterval = setInterval(recordCycle, 3000);
+                // 5秒ごとに録音停止→onstopで再開
+                recordingInterval = setInterval(recordCycle, 10000);
 
                 window.addEventListener('beforeunload', () => {
                     isRecording = false;
