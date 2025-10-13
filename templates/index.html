@@ -398,6 +398,7 @@
             const url = URL.createObjectURL(blob);
             // Audio要素で再生
             const audio = new Audio(url);
+            audio.playbackRate = 2.0; // 再生速度を2倍に設定
             audio.play().catch(e => console.error("再生失敗:", e));
             // 再生後にURLを解放
             audio.onended = () => {
