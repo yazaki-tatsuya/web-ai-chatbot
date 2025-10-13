@@ -230,16 +230,17 @@ def on_open(ws, sid):
     ws.send(json.dumps(session_update))
     print("セッションアップデートメッセージを送信しました。")
     socketio.emit('status_message', {'message': "セッションアップデートメッセージを送信しました。"}, room=sid)
-    response_create = {
-        "type": "response.create",
-        "response": {
-            "modalities": ["text","audio"],
-            "instructions": "ユーザーを支援します"
-        }
-    }
-    ws.send(json.dumps(response_create))
-    print("response.create メッセージを送信しました。")
-    socketio.emit('status_message', {'message': "response.create メッセージを送信しました。"}, room=sid)
+    # response.create は「start_interview」イベント受信時のみ送信するように変更
+    # response_create = {
+    #     "type": "response.create",
+    #     "response": {
+    #         "modalities": ["text","audio"],
+    #         "instructions": "ユーザーを支援します"
+    #     }
+    # }
+    # ws.send(json.dumps(response_create))
+    # print("response.create メッセージを送信しました。")
+    # socketio.emit('status_message', {'message': "response.create メッセージを送信しました。"}, room=sid)
 
 def start_websocket(sid):
     state = client_states.get(sid)
@@ -332,6 +333,39 @@ def handle_audio_data(data):
     except Exception as e:
         print(f"音声データ送信エラー: {e}")
         socketio.emit('status_message', {'message': f"音声データ送信エラー: {e}"}, room=sid)
+
+
+@socketio.on('start_process')
+def handle_start_process():
+    sid = request.sid
+    print(f"[start_process] クライアント {sid} から受信")
+    # クライアント状態初期化（なければ）
+    if sid not in client_states:
+        init_client_state(sid)
+    state = client_states[sid]
+    # WebSocket接続がなければ開始
+    if state["ws_connection"] is None:
+        print("[start_process] WebSocket未接続のため接続開始")
+        start_websocket(sid)
+        # WebSocket接続は非同期なので、on_openでresponse.createを送る
+        # ここでは何もしない
+    else:
+        # 既に接続済みならAI初手発話（response.create）を送信
+        ws = state["ws_connection"]
+        response_create = {
+            "type": "response.create",
+            "response": {
+                "modalities": ["text", "audio"],
+                "instructions": "会話の開始だけ必ず「よろしくお願いします」と発言してください。"
+            }
+        }
+        try:
+            ws.send(json.dumps(response_create))
+            print("[start_process] response.createを送信しました")
+            socketio.emit('status_message', {'message': "AI初手発話を送信しました。"}, room=sid)
+        except Exception as e:
+            print("[start_process] response.create送信エラー:", e)
+            socketio.emit('status_message', {'message': f"AI初手発話送信エラー: {e}"}, room=sid)
 
 if __name__ == "__main__":
     socketio.run(app, host='0.0.0.0', port=5000)
