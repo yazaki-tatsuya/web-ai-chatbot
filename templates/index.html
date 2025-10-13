@@ -98,6 +98,10 @@
     <div id="ai-avatar-container">
         <img id="ai-avatar" src="/static/ai_avatar_closed.png" alt="AI Avatar">
     </div>
+    <!-- インタビュー開始ボタン -->
+    <div class="mb-3" style="margin: 10px 0;">
+        <button id="start-btn" class="btn btn-primary">インタビュー開始</button>
+    </div>
     <div id="chat"></div>
     <div id="status"></div>
     <!-- 音声入力コントロール -->
@@ -121,6 +125,7 @@
             }
         }
         // ページロード時に呼び出す
+        const startBtn = document.getElementById('start-btn');
         initAudio();
 
         // 録音ボタン制御
@@ -171,6 +176,11 @@
                         }
                         audioChunks = [];
                     }
+                    // ストリーム解放はonstop内で行う
+                    if (mediaRecorder && mediaRecorder.stream) {
+                        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                    }
+                    mediaRecorder = null;
                 };
 
                 mediaRecorder.start();
@@ -185,15 +195,14 @@
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
                 console.log("[Media] 録音停止");
-
-                // 状態反映
-                voiceStartBtn.classList.add('btn-success');
-                voiceStartBtn.classList.remove('btn-outline-success');
-                voiceStartBtn.disabled = false;
-                voiceStopBtn.classList.add('btn-outline-danger');
-                voiceStopBtn.classList.remove('btn-danger');
-                voiceStopBtn.disabled = true;
             }
+            // ボタン状態リセット
+            voiceStartBtn.classList.add('btn-success');
+            voiceStartBtn.classList.remove('btn-outline-success');
+            voiceStartBtn.disabled = false;
+            voiceStopBtn.classList.add('btn-outline-danger');
+            voiceStopBtn.classList.remove('btn-danger');
+            voiceStopBtn.disabled = true;
         });
 
         // WAV→PCM16(24kHz, mono, little-endian)変換関数（グローバルスコープに移動）
@@ -398,6 +407,7 @@
             const url = URL.createObjectURL(blob);
             // Audio要素で再生
             const audio = new Audio(url);
+            audio.playbackRate = 2.0; // 再生速度を2倍に設定
             audio.play().catch(e => console.error("再生失敗:", e));
             // 再生後にURLを解放
             audio.onended = () => {
@@ -425,6 +435,12 @@
 
         // ユーザーからの音声入力が完了したら、ユーザーのメッセージをチャットに追加するロジックを追加することも可能です。
         // 現在はバックエンドからのメッセージのみを表示しています。
+        startBtn.addEventListener('click', () => {
+            socket.emit('start_process');
+            startBtn.disabled = true;
+            voiceStartBtn.disabled = false;
+            console.log("[UI] インタビュー開始ボタン押下: start_process送信");
+        });
     </script>
 </body>
 </html>
