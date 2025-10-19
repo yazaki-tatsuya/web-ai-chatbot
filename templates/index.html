@@ -273,7 +273,7 @@
 
                 // 録音ループ
                 function recordCycle() {
-                    if (mediaRecorder.state === 'recording') {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
                 }
@@ -282,7 +282,7 @@
                 isRecording = true;
                 mediaRecorder.start();
                 // 5秒ごとに録音停止→onstopで再開
-                recordingInterval = setInterval(recordCycle, 10000);
+                recordingInterval = setInterval(recordCycle, 20000);
 
                 window.addEventListener('beforeunload', () => {
                     isRecording = false;
