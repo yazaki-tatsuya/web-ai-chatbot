@@ -161,22 +161,28 @@
                         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                         const pcm16 = await wavToPCM16(audioBlob, 24000);
                         const uint8Array = new Uint8Array(pcm16.buffer);
-                        let binary = "";
-                        const chunkSize = 8192;
-                        for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                            const chunk = uint8Array.subarray(i, i + chunkSize);
-                            binary += String.fromCharCode(...chunk);
-                        }
-                        const base64Audio = btoa(binary);
-                        if (uint8Array.length > 500) {
+                
+                        // base64分割送信（64KBずつ）
+                        const maxChunkBytes = 64000;
+                        for (let offset = 0; offset < uint8Array.length; offset += maxChunkBytes) {
+                            const slice = uint8Array.subarray(offset, offset + maxChunkBytes);
+                            let binary = "";
+                            const chunkSize = 8192;
+                            for (let i = 0; i < slice.length; i += chunkSize) {
+                                const sub = slice.subarray(i, i + chunkSize);
+                                binary += String.fromCharCode(...sub);
+                            }
+                            const base64Audio = btoa(binary);
                             socket.emit('audio_data', { audio: base64Audio });
-                            console.log("[Send] オーディオ送信完了 (Length:", uint8Array.length, ")");
-                        } else {
-                            console.warn("[Skip] オーディオが小さすぎるため送信スキップ");
+                            console.log("[Send] チャンク送信:", offset, "/", uint8Array.length);
+                            await new Promise(r => setTimeout(r, 5)); // より短い間隔で連続送信
                         }
+                
+                        // commit送信
+                        socket.emit('audio_commit');
+                        console.log("[Send] audio_commit送信完了");
                         audioChunks = [];
                     }
-                    // ストリーム解放はonstop内で行う
                     if (mediaRecorder && mediaRecorder.stream) {
                         mediaRecorder.stream.getTracks().forEach(track => track.stop());
                     }
@@ -196,6 +202,9 @@
                 mediaRecorder.stop();
                 console.log("[Media] 録音停止");
             }
+            // サーバーにcommitを送信
+            socket.emit('audio_commit');
+            console.log("[Send] audio_commit送信");
             // ボタン状態リセット
             voiceStartBtn.classList.add('btn-success');
             voiceStartBtn.classList.remove('btn-outline-success');
@@ -297,8 +306,9 @@
                 console.error('音声録音初期化エラー:', err);
             }
         }
-        // ページロード時に録音ループ開始
-        startRecordingLoop();
+        // ページロード時には録音ループを開始しない（ボタンで制御する方式に変更）
+        // startRecordingLoop();
+        console.log("[Init] 録音ループ自動開始を停止しました。ボタン操作で録音を開始します。");
 
         // AIアバターの口の動きを、テキストの長さに合わせて保持する関数
         function animateAvatarForText(text) {
