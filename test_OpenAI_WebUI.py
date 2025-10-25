@@ -241,6 +241,9 @@ def on_open(ws, sid):
     # ws.send(json.dumps(response_create))
     # print("response.create メッセージを送信しました。")
     # socketio.emit('status_message', {'message': "response.create メッセージを送信しました。"}, room=sid)
+    # --- 追加: 起動時に自動発話しない旨を明示 ---
+    print("AI初手発話は on_open では行いません（ユーザー操作または発話後に開始）。")
+    socketio.emit('status_message', {'message': "AI初手発話は on_open では行いません。"}, room=sid)
 
 def start_websocket(sid):
     state = client_states.get(sid)
@@ -356,7 +359,11 @@ def handle_start_process():
             "type": "response.create",
             "response": {
                 "modalities": ["text", "audio"],
-                "instructions": "会話の開始だけ必ず「よろしくお願いします」と発言してください。"
+                "instructions": (
+                    "あなたは丁寧で穏やかなインタビュアーです。"
+                    "初回の発話では「よろしくお願いします。」の後に一言だけ自然な導入（例：「今日はよろしくお願いします。」や「では始めていきましょうか。」）を添えてください。"
+                    "部屋や物体など視覚的な描写は行わないでください。"
+                )
             }
         }
         try:
