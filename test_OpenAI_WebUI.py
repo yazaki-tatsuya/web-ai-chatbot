@@ -220,7 +220,7 @@ def on_open(ws, sid):
                 "type": "server_vad",
                 "threshold": 0.5,
                 "prefix_padding_ms": 300,
-                "silence_duration_ms": 1000
+                "silence_duration_ms":2000  # 長めに設定して1発話を統合
             },
             "input_audio_transcription": {
                 "model": "whisper-1"
