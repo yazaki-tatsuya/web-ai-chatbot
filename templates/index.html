@@ -164,26 +164,29 @@
                 
                         // base64分割送信（64KBずつ）
                         const maxChunkBytes = 64000;
+                        const sendTasks = [];
                         for (let offset = 0; offset < uint8Array.length; offset += maxChunkBytes) {
                             const slice = uint8Array.subarray(offset, offset + maxChunkBytes);
-                            let binary = "";
-                            const chunkSize = 8192;
-                            for (let i = 0; i < slice.length; i += chunkSize) {
-                                const sub = slice.subarray(i, i + chunkSize);
-                                binary += String.fromCharCode(...sub);
-                            }
-                            const base64Audio = btoa(binary);
-                            socket.emit('audio_data', { audio: base64Audio });
-                            console.log("[Send] チャンク送信:", offset, "/", uint8Array.length);
-                            // Azure AppServiceのネットワーク遅延対策: 送信間隔を延長
-                            await new Promise(r => setTimeout(r, 20));
-                            }
-                            
-                            // 全チャンク送信後、十分な待機を挟んでからcommit送信（送信遅延対策）
-                            await new Promise(r => setTimeout(r, 300));
-                            socket.emit('audio_commit');
-                            console.log("[Send] audio_commit送信完了");
-                            audioChunks = [];
+                            sendTasks.push((async () => {
+                                let binary = "";
+                                const chunkSize = 8192;
+                                for (let i = 0; i < slice.length; i += chunkSize) {
+                                    const sub = slice.subarray(i, i + chunkSize);
+                                    binary += String.fromCharCode(...sub);
+                                }
+                                const base64Audio = btoa(binary);
+                                socket.emit('audio_data', { audio: base64Audio });
+                                console.log("[Send] チャンク送信:", offset, "/", uint8Array.length);
+                                await new Promise(r => setTimeout(r, 10));
+                            })());
+                        }
+                        // すべてのチャンク送信が完了するまで待機
+                        await Promise.all(sendTasks);
+                        
+                        // commitは全チャンク送信完了後に実施（確実な順序保証）
+                        socket.emit('audio_commit');
+                        console.log("[Send] audio_commit送信完了");
+                        audioChunks = [];
                     }
                     if (mediaRecorder && mediaRecorder.stream) {
                         mediaRecorder.stream.getTracks().forEach(track => track.stop());
@@ -204,10 +207,7 @@
                 mediaRecorder.stop();
                 console.log("[Media] 録音停止");
             }
-            // サーバーにcommitを送信
-            socket.emit('audio_commit');
-            console.log("[Send] audio_commit送信");
-            // ボタン状態リセット
+            // commit送信は MediaRecorder.onstop 側で実施するため、ここでは送信しない
             voiceStartBtn.classList.add('btn-success');
             voiceStartBtn.classList.remove('btn-outline-success');
             voiceStartBtn.disabled = false;
@@ -439,4 +439,5 @@
     </script>
 </body>
 </html>
+
 
