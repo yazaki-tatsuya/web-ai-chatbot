@@ -5,7 +5,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>AIチャットインターフェース17</title>
+    <title>AIチャットインターフェース18</title>
     <!-- Bootstrap 5.3.0-alpha1 CSS追加 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- integrity 属性を削除 -->
@@ -327,9 +327,21 @@
         // AI応答を受信して赤い吹き出しを表示
         // AIメッセージ受信時は必ずaddAIMessageのみ呼ぶ
         socket.on('ai_message', (data) => {
-            if (data && data.message) {
-                addAIMessage(data.message);
+            if (!data || !data.message) return;
+            const chat = document.getElementById('chat');
+            let msgDiv = chat.querySelector('.message.ai[data-turn="' + (data.turn || 0) + '"]');
+            if (!msgDiv) {
+                msgDiv = document.createElement('div');
+                msgDiv.className = 'message ai';
+                msgDiv.setAttribute('data-turn', data.turn || 0);
+                chat.appendChild(msgDiv);
             }
+            msgDiv.textContent = data.message;
+            chat.scrollTop = chat.scrollHeight;
+            if (!data.stream) {
+                msgDiv.classList.add('ai-final');
+            }
+            console.log('AIメッセージ更新:', data.stream ? '(部分)' : '(確定)', data.message);
         });
 
         const messages = [];
