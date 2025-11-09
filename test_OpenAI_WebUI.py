@@ -93,6 +93,10 @@ def on_message(ws, message, sid):
             delta = message_data.get("delta") or ""
             state["ai_transcription_buffer"] += delta
             print(f"AIの応答（audio_transcript.delta）: {delta}")
+            # --- ストリーミング応答: delta受信ごとに段階的に送信 ---
+            if delta.strip():
+                socketio.emit('ai_message', {'message': state["ai_transcription_buffer"], 'turn': state["current_turn"], 'stream': True}, room=sid)
+                socketio.emit('status_message', {'message': 'AI応答(部分)ストリーミング送信'}, room=sid)
 
         elif msg_type == "response.audio_transcript.done":
             # emitは下の162行目側でのみ行う（ここではバッファクリアのみ）
