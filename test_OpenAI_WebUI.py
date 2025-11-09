@@ -161,12 +161,13 @@ def on_message(ws, message, sid):
             final_ai_text = state["ai_transcription_buffer"]
             state["ai_transcription_buffer"] = ""
             print("メッセージ受信：response.audio_transcript.done")
+            # --- 各AI応答ごとにturnを進めて独立した吹き出しを確保 ---
+            state["current_turn"] += 1
             if final_ai_text and final_ai_text.strip():
                 socketio.emit('ai_message', {'message': final_ai_text, 'turn': state["current_turn"]}, room=sid)
                 state["last_ai_message"] = final_ai_text
                 socketio.emit('status_message', {'message': 'AIの音声文字起こしが完了しました。'}, room=sid)
             else:
-                # 空でもダミーで吹き出しを出す
                 socketio.emit('ai_message', {'message': '（無応答）', 'turn': state["current_turn"]}, room=sid)
                 print("final_ai_textが空のためダミーai_messageをemitしました")
 
@@ -192,6 +193,13 @@ def on_message(ws, message, sid):
                     print("audio done decode error:", e)
             # バッファクリア
             state["audio_pcm_buffer"] = bytearray()
+        elif msg_type == "response.created":
+            print("メッセージ受信：response.created")
+            # --- 🔧 新規AI応答開始時にバッファ初期化 ---
+            state["ai_transcription_buffer"] = ""
+            state["last_ai_message"] = ""
+            print("AI応答バッファを初期化しました。")
+            socketio.emit('status_message', {'message': "メッセージ受信：response.created"}, room=sid)
         else:
             print(f"メッセージ受信：{msg_type}")
             socketio.emit('status_message', {'message': f"メッセージ受信：{msg_type}"}, room=sid)
