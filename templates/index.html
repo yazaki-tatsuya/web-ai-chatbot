@@ -329,19 +329,32 @@
         socket.on('ai_message', (data) => {
             if (!data || !data.message) return;
             const chat = document.getElementById('chat');
-            let msgDiv = chat.querySelector('.message.ai[data-turn="' + (data.turn || 0) + '"]');
+        
+            const isStream = !!data.stream;
+            // 前のAI吹き出しを再利用
+            const lastMsg = chat.querySelector('.message.ai:last-of-type');
+            const turn = (typeof data.turn === 'number' && data.turn > 0)
+                ? data.turn
+                : (lastMsg ? lastMsg.dataset.turn : Date.now());
+        
+            let msgDiv = chat.querySelector(`.message.ai[data-turn="${turn}"]`);
             if (!msgDiv) {
                 msgDiv = document.createElement('div');
                 msgDiv.className = 'message ai';
-                msgDiv.setAttribute('data-turn', data.turn || 0);
+                msgDiv.dataset.turn = turn;
                 chat.appendChild(msgDiv);
             }
+        
+            // ストリーミング中は更新のみ、確定時にアニメ
             msgDiv.textContent = data.message;
             chat.scrollTop = chat.scrollHeight;
-            if (!data.stream) {
+        
+            if (!isStream) {
                 msgDiv.classList.add('ai-final');
+                animateAvatarForText(data.message);
             }
-            console.log('AIメッセージ更新:', data.stream ? '(部分)' : '(確定)', data.message);
+        
+            console.log('AIメッセージ更新:', isStream ? '(部分)' : '(確定)', data.message, 'turn', turn);
         });
 
         const messages = [];
