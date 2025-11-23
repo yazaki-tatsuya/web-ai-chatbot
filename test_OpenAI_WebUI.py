@@ -46,7 +46,7 @@ def cleanup_client_state(sid):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index_realtime.html')
 
 def on_message(ws, message, sid):
     try:
@@ -301,6 +301,50 @@ def handle_disconnect():
     print(f'クライアントが切断しました: {sid}')
     socketio.emit('status_message', {'message': "クライアントが切断しました。"}, room=sid)
     cleanup_client_state(sid)
+
+# ============================================================
+# ✅ JWTトークン発行エンドポイントの追加
+# ============================================================
+import time
+import jwt
+from flask import jsonify
+
+JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "local-dev-secret")
+JWT_EXP_SECONDS = 300  # トークン有効期限5分
+
+@app.route("/jwt", methods=["GET"])
+def issue_jwt_token():
+    """Realtime API に直接接続するための一時JWTを発行"""
+    payload = {
+        "aud": "openai-realtime",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + JWT_EXP_SECONDS,
+        "iss": "flask-server",
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    return jsonify({"jwt": token})
+
+
+# ============================================================
+# ✅ SDP Proxyエンドポイント（CORS回避用）
+# ============================================================
+@app.route("/realtime/sdp-proxy", methods=["POST"])
+def realtime_sdp_proxy():
+    """ブラウザのSDP Offerを安全に中継してCORSを回避"""
+    try:
+        import requests
+        sdp_offer = request.data.decode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {os.environ.get('OPEN_AI_KEY')}",
+            "Content-Type": "application/sdp",
+            "OpenAI-Beta": "realtime=v1"
+        }
+        url = "https://api.openai.com/v1/realtime?model=gpt-realtime"
+        res = requests.post(url, headers=headers, data=sdp_offer)
+        return res.text, res.status_code, {"Content-Type": "application/sdp"}
+    except Exception as e:
+        print("SDP Proxy error:", e)
+        return str(e), 500
 # クライアントから音声データを受信し、OpenAI WebSocketに転送
 @socketio.on('audio_data')
 def handle_audio_data(data):
