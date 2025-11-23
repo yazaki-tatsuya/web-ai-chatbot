@@ -134,17 +134,29 @@
     async function createLocalOffer(){
       pc = new RTCPeerConnection();
       dataChannel = pc.createDataChannel("oai-events");
+
+      // --- DataChannel open直後に WebRTC セッションへ session.update を送る --- //
+      dataChannel.onopen = () => { // NEW(★)
+        // WebRTCセッションに対して“この接続”の設定を適用（サーバ側WSには影響しない） // NEW(★)
+        const update = {                                             // NEW(★)
+          type: "session.update",                                    // NEW(★)
+          session: {                                                 // NEW(★)
+            // Whisperでユーザー入力の文字起こしを有効化                     // NEW(★)
+            input_audio_transcription: { model: "whisper-1", language: "ja" }, // NEW(★)
+            // 任意：サーバVAD（自動区切り）。既定でも可                       // NEW(★)
+            turn_detection: { type: "server_vad" }                   // NEW(★)
+          }                                                          // NEW(★)
+        };                                                           // NEW(★)
+        dataChannel.send(JSON.stringify(update));                    // NEW(★)
+        appendStatus("session.update を送信（WebRTC）");                 // NEW(★)
+      };                                                             // NEW(★)
+      // ----------------------------------------------------------------------- //  
+
       dataChannel.onmessage = (event) => {
         const msg = event.data;
         console.log("📩 DataChannel受信:", msg);
         try {
           const parsed = JSON.parse(msg);
-          // ✅ ユーザー吹き出し用バッファ
-          if (!window._userBuffer) window._userBuffer = "";
-
-          // ✅ gpt-realtime 正式イベントに準拠したユーザー音声文字起こし処理
-          if (!window._userBuffer) window._userBuffer = "";
-
           // ✅ 正式仕様: input_audio_buffer.transcription.* のみを使用して緑吹き出しを描画
           if (!window._userBuffer) window._userBuffer = "";
 
@@ -174,7 +186,33 @@
             bubble.classList.remove('streaming');
             chat.scrollTop = chat.scrollHeight;
           }
-          // conversation.item.createdは利用しない（transcript:nullに対処済）
+          // ▼▼▼ ここから追記（WebRTC 音声の正しいイベント型を捕捉） ▼▼▼
+          else if (parsed.type === "conversation.item.input_audio_transcription.delta" && parsed.delta) {
+            // WebRTC用：ユーザー発話の途中をリアルタイムで更新 
+            window._userBuffer += parsed.delta;    
+            let bubble = chat.querySelector('.message.user.streaming');
+            if (!bubble) {                         
+              bubble = document.createElement('div');     
+              bubble.className = 'message user streaming';
+              chat.appendChild(bubble);            
+            }                                      
+            bubble.textContent = window._userBuffer.trim();
+            chat.scrollTop = chat.scrollHeight;    
+          }                                        
+          else if (parsed.type === "conversation.item.input_audio_transcription.completed" && parsed.transcript) {
+            // WebRTC用：ユーザー発話の確定     
+            window._userBuffer = parsed.transcript;
+            let bubble = chat.querySelector('.message.user.streaming');
+            if (!bubble) {                         
+              bubble = document.createElement('div');     
+              bubble.className = 'message user streaming';
+              chat.appendChild(bubble);            
+            }                                      
+            bubble.textContent = window._userBuffer.trim();
+            bubble.classList.remove('streaming');  
+            chat.scrollTop = chat.scrollHeight;    
+          }                                        
+          // ▲▲▲ 追記ここまで ▲▲▲
 
           // ✅ AI応答 吹き出し用バッファ
           if (!window._aiBuffer) window._aiBuffer = "";
