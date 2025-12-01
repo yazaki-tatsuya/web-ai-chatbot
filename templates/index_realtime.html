@@ -87,7 +87,13 @@
       if (!bubble || !stream) {
         bubble = document.createElement('div');
         bubble.className = 'message ai streaming';
-        chat.appendChild(bubble);
+        // ▼ 変更点(2/2): 可能なら「直前のユーザーstreaming吹き出しの直後」に配置
+        const u = chat.querySelector('.message.user.streaming');
+        if (u && u.parentNode === chat) {
+          u.insertAdjacentElement('afterend', bubble);
+        } else {
+          chat.appendChild(bubble);
+        }
       }
       bubble.textContent = msg.trim();
       chat.scrollTop = chat.scrollHeight;
@@ -160,6 +166,19 @@
           // ✅ 正式仕様: input_audio_buffer.transcription.* のみを使用して緑吹き出しを描画
           if (!window._userBuffer) window._userBuffer = "";
 
+          // ▼ 変更点(1/2): 発話開始が来たら即座に緑のstreaming吹き出しを出す
+          if (parsed.type === "input_audio_buffer.speech_started") {
+            let bubble = chat.querySelector('.message.user.streaming');
+            if (!bubble) {
+              bubble = document.createElement('div');
+              bubble.className = 'message user streaming';
+              bubble.textContent = '…';
+              chat.appendChild(bubble);
+            }
+            chat.scrollTop = chat.scrollHeight;
+          }
+          // --- ここまで追加 ---
+
           if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
             // ユーザー発話の途中をリアルタイムで吹き出し更新
             console.log("🟩 transcription.delta:", parsed.delta);
@@ -224,7 +243,13 @@
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              chat.appendChild(bubble);
+              // ▼ 変更点(2/2) と同趣旨：緑があればその直後に
+              const u = chat.querySelector('.message.user.streaming');
+              if (u && u.parentNode === chat) {
+                u.insertAdjacentElement('afterend', bubble);
+              } else {
+                chat.appendChild(bubble);
+              }
             }
             bubble.textContent = window._aiBuffer.trim();
             chat.scrollTop = chat.scrollHeight;
@@ -236,7 +261,13 @@
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              chat.appendChild(bubble);
+              // ▼ 変更点(2/2) と同趣旨：緑があればその直後に
+              const u = chat.querySelector('.message.user.streaming');
+              if (u && u.parentNode === chat) {
+                u.insertAdjacentElement('afterend', bubble);
+              } else {
+                chat.appendChild(bubble);
+              }
             }
             bubble.textContent = window._aiBuffer.trim();
             bubble.classList.remove('streaming');
