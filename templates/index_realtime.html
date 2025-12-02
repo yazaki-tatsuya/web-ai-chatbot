@@ -56,6 +56,9 @@
 <body>
   <h3>Realtime Audio Chat (JWT直結)</h3>
   <div class="mb-3">
+    <!-- ▼▼ 追加(1/2)：プロンプト入力欄 ▼▼ -->
+    <textarea id="prompt" class="form-control mb-2" rows="3" placeholder="ここにシナリオ/設定（システムプロンプト）を入力してください。例：あなたは厳しめの英会話コーチです。短文で返答し、毎回1文だけ添削してください。"></textarea>
+    <!-- ▲▲ 追加(1/2) ここまで ▲▲ -->
     <button id="start-btn" class="btn btn-primary">Realtime開始</button>
   </div>
   <div id="chat"></div>
@@ -87,7 +90,7 @@
       if (!bubble || !stream) {
         bubble = document.createElement('div');
         bubble.className = 'message ai streaming';
-        // ▼ 変更点(2/2): 可能なら「直前のユーザーstreaming吹き出しの直後」に配置
+        // ▼ 変更点(既存ロジック維持)：可能なら直前のユーザーstreaming吹き出しの直後に配置
         const u = chat.querySelector('.message.user.streaming');
         if (u && u.parentNode === chat) {
           u.insertAdjacentElement('afterend', bubble);
@@ -143,19 +146,27 @@
 
       // --- DataChannel open直後に WebRTC セッションへ session.update を送る --- //
       dataChannel.onopen = () => { // NEW(★)
-        // WebRTCセッションに対して“この接続”の設定を適用（サーバ側WSには影響しない） // NEW(★)
-        const update = {                                             // NEW(★)
-          type: "session.update",                                    // NEW(★)
-          session: {                                                 // NEW(★)
-            // Whisperでユーザー入力の文字起こしを有効化                     // NEW(★)
-            input_audio_transcription: { model: "whisper-1", language: "ja" }, // NEW(★)
-            // 任意：サーバVAD（自動区切り）。既定でも可                       // NEW(★)
-            turn_detection: { type: "server_vad" }                   // NEW(★)
-          }                                                          // NEW(★)
-        };                                                           // NEW(★)
-        dataChannel.send(JSON.stringify(update));                    // NEW(★)
-        appendStatus("session.update を送信（WebRTC）");                 // NEW(★)
-      };                                                             // NEW(★)
+        // ▼▼ 追加(2/2)：テキスト入力値を instructions に適用 ▼▼
+        const promptEl = document.getElementById('prompt');
+        const userInstructions = (promptEl && promptEl.value.trim()) ? promptEl.value.trim()
+                               : "あなたは親切で有能なアシスタントです。応答は簡潔に。";
+        // ▲▲ 追加(2/2) ここまで ▲▲
+
+        // WebRTCセッションに対して“この接続”の設定を適用（サーバ側WSには影響しない）
+        const update = {
+          type: "session.update",
+          session: {
+            // Whisperでユーザー入力の文字起こしを有効化
+            input_audio_transcription: { model: "whisper-1", language: "ja" },
+            // 任意：サーバVAD（自動区切り）。既定でも可
+            turn_detection: { type: "server_vad" },
+            // ▼ 追加：ユーザー指定のシステムプロンプトを適用
+            instructions: userInstructions
+          }
+        };
+        dataChannel.send(JSON.stringify(update));
+        appendStatus("session.update を送信（WebRTC, with instructions）");
+      };
       // ----------------------------------------------------------------------- //  
 
       dataChannel.onmessage = (event) => {
@@ -166,7 +177,7 @@
           // ✅ 正式仕様: input_audio_buffer.transcription.* のみを使用して緑吹き出しを描画
           if (!window._userBuffer) window._userBuffer = "";
 
-          // ▼ 変更点(1/2): 発話開始が来たら即座に緑のstreaming吹き出しを出す
+          // 発話開始で緑の streaming 吹き出しを即座に表示
           if (parsed.type === "input_audio_buffer.speech_started") {
             let bubble = chat.querySelector('.message.user.streaming');
             if (!bubble) {
@@ -177,7 +188,6 @@
             }
             chat.scrollTop = chat.scrollHeight;
           }
-          // --- ここまで追加 ---
 
           if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
             // ユーザー発話の途中をリアルタイムで吹き出し更新
@@ -205,9 +215,8 @@
             bubble.classList.remove('streaming');
             chat.scrollTop = chat.scrollHeight;
           }
-          // ▼▼▼ ここから追記（WebRTC 音声の正しいイベント型を捕捉） ▼▼▼
+          // ▼▼▼ WebRTC互換イベント ▼▼▼
           else if (parsed.type === "conversation.item.input_audio_transcription.delta" && parsed.delta) {
-            // WebRTC用：ユーザー発話の途中をリアルタイムで更新 
             window._userBuffer += parsed.delta;    
             let bubble = chat.querySelector('.message.user.streaming');
             if (!bubble) {                         
@@ -219,7 +228,6 @@
             chat.scrollTop = chat.scrollHeight;    
           }                                        
           else if (parsed.type === "conversation.item.input_audio_transcription.completed" && parsed.transcript) {
-            // WebRTC用：ユーザー発話の確定     
             window._userBuffer = parsed.transcript;
             let bubble = chat.querySelector('.message.user.streaming');
             if (!bubble) {                         
@@ -231,7 +239,6 @@
             bubble.classList.remove('streaming');  
             chat.scrollTop = chat.scrollHeight;    
           }                                        
-          // ▲▲▲ 追記ここまで ▲▲▲
 
           // ✅ AI応答 吹き出し用バッファ
           if (!window._aiBuffer) window._aiBuffer = "";
@@ -243,7 +250,6 @@
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              // ▼ 変更点(2/2) と同趣旨：緑があればその直後に
               const u = chat.querySelector('.message.user.streaming');
               if (u && u.parentNode === chat) {
                 u.insertAdjacentElement('afterend', bubble);
@@ -261,7 +267,6 @@
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              // ▼ 変更点(2/2) と同趣旨：緑があればその直後に
               const u = chat.querySelector('.message.user.streaming');
               if (u && u.parentNode === chat) {
                 u.insertAdjacentElement('afterend', bubble);
