@@ -67,6 +67,7 @@
     const chat = document.getElementById('chat');
     const statusArea = document.getElementById('status');
     let pc, dataChannel;
+    let lastUserFinalEl = null; // ★ 追加：直近の確定ユーザーバブル参照
 
     async function appendStatus(msg){ 
       const div = document.createElement('div');
@@ -88,10 +89,20 @@
     async function appendAI(msg, stream = false) {
       let bubble = chat.querySelector('.message.ai.streaming');
       if (!bubble || !stream) {
+        // ▼▼ ここから最小追記：アンカー（緑）を必ず用意する ▼▼
+        let uStream = chat.querySelector('.message.user.streaming');
+        if (!uStream && !lastUserFinalEl) {
+          uStream = document.createElement('div');
+          uStream.className = 'message user streaming';
+          uStream.textContent = '…';
+          chat.appendChild(uStream);
+        }
+        // ▲▲ 追記ここまで ▲▲
+
         bubble = document.createElement('div');
         bubble.className = 'message ai streaming';
-        // ▼ 変更点(既存ロジック維持)：可能なら直前のユーザーstreaming吹き出しの直後に配置
-        const u = chat.querySelector('.message.user.streaming');
+        // 既存ロジック＋フォールバック：streaming緑 or 最終緑の直後に配置
+        const u = chat.querySelector('.message.user.streaming') || lastUserFinalEl;
         if (u && u.parentNode === chat) {
           u.insertAdjacentElement('afterend', bubble);
         } else {
@@ -174,7 +185,6 @@
         console.log("📩 DataChannel受信:", msg);
         try {
           const parsed = JSON.parse(msg);
-          // ✅ 正式仕様: input_audio_buffer.transcription.* のみを使用して緑吹き出しを描画
           if (!window._userBuffer) window._userBuffer = "";
 
           // 発話開始で緑の streaming 吹き出しを即座に表示
@@ -190,8 +200,6 @@
           }
 
           if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
-            // ユーザー発話の途中をリアルタイムで吹き出し更新
-            console.log("🟩 transcription.delta:", parsed.delta);
             window._userBuffer += parsed.delta;
             let bubble = chat.querySelector('.message.user.streaming');
             if (!bubble) {
@@ -203,7 +211,6 @@
             chat.scrollTop = chat.scrollHeight;
           }
           else if (parsed.type === "input_audio_buffer.transcription.completed" && parsed.transcription) {
-            // ユーザー発話確定：吹き出しを確定して固定
             window._userBuffer = parsed.transcription;
             let bubble = chat.querySelector('.message.user.streaming');
             if (!bubble) {
@@ -213,6 +220,7 @@
             }
             bubble.textContent = window._userBuffer.trim();
             bubble.classList.remove('streaming');
+            lastUserFinalEl = bubble; // ★ 既存：確定緑をアンカー保存
             chat.scrollTop = chat.scrollHeight;
           }
           // ▼▼▼ WebRTC互換イベント ▼▼▼
@@ -236,7 +244,8 @@
               chat.appendChild(bubble);            
             }                                      
             bubble.textContent = window._userBuffer.trim();
-            bubble.classList.remove('streaming');  
+            bubble.classList.remove('streaming');
+            lastUserFinalEl = bubble; // ★ 追加：WebRTC系の確定でもアンカー更新
             chat.scrollTop = chat.scrollHeight;    
           }                                        
 
@@ -244,13 +253,21 @@
           if (!window._aiBuffer) window._aiBuffer = "";
 
           if (parsed.type === "response.audio_transcript.delta" && parsed.delta) {
-            // ストリーミング中は既存吹き出しに文字を追加更新
             window._aiBuffer += parsed.delta;
             let bubble = chat.querySelector('.message.ai.streaming');
             if (!bubble) {
+              // ▼▼ 最小追記：緑アンカーの強制用意 ▼▼
+              let uStream = chat.querySelector('.message.user.streaming');
+              if (!uStream && !lastUserFinalEl) {
+                uStream = document.createElement('div');
+                uStream.className = 'message user streaming';
+                uStream.textContent = '…';
+                chat.appendChild(uStream);
+              }
+              // ▲▲
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              const u = chat.querySelector('.message.user.streaming');
+              const u = chat.querySelector('.message.user.streaming') || lastUserFinalEl;
               if (u && u.parentNode === chat) {
                 u.insertAdjacentElement('afterend', bubble);
               } else {
@@ -261,13 +278,21 @@
             chat.scrollTop = chat.scrollHeight;
           }
           else if (parsed.type === "response.audio_transcript.done" && parsed.transcript) {
-            // 最終テキストを確定
             window._aiBuffer = parsed.transcript;
             let bubble = chat.querySelector('.message.ai.streaming');
             if (!bubble) {
+              // ▼▼ 最小追記：緑アンカーの強制用意 ▼▼
+              let uStream = chat.querySelector('.message.user.streaming');
+              if (!uStream && !lastUserFinalEl) {
+                uStream = document.createElement('div');
+                uStream.className = 'message user streaming';
+                uStream.textContent = '…';
+                chat.appendChild(uStream);
+              }
+              // ▲▲
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
-              const u = chat.querySelector('.message.user.streaming');
+              const u = chat.querySelector('.message.user.streaming') || lastUserFinalEl;
               if (u && u.parentNode === chat) {
                 u.insertAdjacentElement('afterend', bubble);
               } else {
