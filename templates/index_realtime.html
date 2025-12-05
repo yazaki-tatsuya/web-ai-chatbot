@@ -68,10 +68,19 @@
     const statusArea = document.getElementById('status');
     let pc, dataChannel;
     let lastUserFinalEl = null; // 既存変数は残置（下位互換のため）
+    let provisionalUserBubble = null;   // speech_started 直後に出す暫定バブル
+
+    // ★追加：今「誰のユーザーターン」を肉付け中か
+    let activeUserRootId = null;    
 
     // ▼▼ 追記：item順序制御用のマップと挿入ヘルパ ▼▼
     const nodeByItem = new Map();        // item_id -> DOMノード
     const waitingChildren = new Map();   // parent_item_id -> [子ノード待機列]
+    // 追加: ユーザー発話統合用のメタ情報
+    const itemRole = new Map();          // item_id -> 'user' | 'assistant' ...
+    const itemRoot = new Map();          // item_id -> root item_id（ユーザー連続発話の先頭）
+    const rootItems = new Map();         // root item_id -> [item_id, ...]（同じ吹き出しに統合される順序）
+    const userTextByItem = new Map();    // item_id -> transcript
 
     function insertAfterAnchor(node, previousId) {
       const anchor = nodeByItem.get(previousId);
@@ -204,11 +213,19 @@
         const update = {
           type: "session.update",
           session: {
-            // Whisperでユーザー入力の文字起こしを有効化
-            input_audio_transcription: { model: "whisper-1", language: "ja" },
-            // 任意：サーバVAD（自動区切り）。既定でも可
-            turn_detection: { type: "server_vad" },
-            // ▼ 追加：ユーザー指定のシステムプロンプトを適用
+            input_audio_transcription: {
+              model: "whisper-1",
+              language: "ja",
+            },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              // 「無音がこのくらい続いたら1発話として区切る」の秒数イメージ
+              // 値を小さくすると、短い間でも小刻みに区切ってくれる（＝テキストも早く出やすい）
+              // silence_duration_ms: 300,      // ここを 300ms 前後に
+              prefix_padding_ms: 300,        // 直前の音声も少しだけ巻き戻して含める
+              idle_timeout_ms: null
+            },
             instructions: userInstructions
           }
         };
@@ -222,101 +239,199 @@
         console.log("📩 DataChannel受信:", msg);
         try {
           const parsed = JSON.parse(msg);
-          if (!window._userBuffer) window._userBuffer = "";
 
-          // ▼▼▼ 追記：スレッド順の基準（previous_item_id）でDOMを作成 ▼▼▼
+          // ▼▼▼ スレッド順の基準（previous_item_id） + 吹き出し統合ロジック ▼▼▼
           if (parsed.type === "conversation.item.created" && parsed.item) {
             const it = parsed.item;
             const prev = parsed.previous_item_id || null;
+            itemRole.set(it.id, it.role);
 
-            // 既存のユーザー streaming バブルがあれば再利用して登録（重複防止）
-            let bubble;
-            if (it.role === 'user') {
-              bubble = chat.querySelector('.message.user.streaming') || document.createElement('div');
-              bubble.className = 'message user streaming';
-              if (!bubble.parentNode) chat.appendChild(bubble);
-            } else {
-              bubble = document.createElement('div');
-              bubble.className = 'message ai streaming';
-            }
-            // 初期表示
+            // ★追加①：アシスタントが出てきたら「直前のユーザーターンは終わり」
             if (it.role === 'assistant') {
-              bubble.textContent = '';
-            } else {
-              if (!bubble.textContent) bubble.textContent = '…';
+              // 今しゃべっているユーザーターンは無しにする
+              activeUserRootId = null;
+
+              // もし使われなかった暫定「…」バブルが残っていたら削除
+              if (provisionalUserBubble) {
+                provisionalUserBubble.remove();
+                provisionalUserBubble = null;
+              }
+
+              // この後の user 用の処理はスキップしたいので return
+              // （もしアシスタント側のDOM生成をここでやっている場合は、
+              //  return の代わりに「assistant用の既存処理」をこの下に書く）
+              // いま貼っていただいたコードは user 用だけだったので、
+              // 今回は return でOK
+              return;
             }
 
-            registerNode(it.id, bubble, prev);
+            // ▼ ここから下は既存の「user用」ロジックをそのまま利用 ▼
+            if (it.role === 'user') {
+              let rootId;
+              let bubble;
 
-            // 後続の transcript.* で上書きされる
-            if (it.role === 'user') window._userBuffer = "";
-            chat.scrollTop = chat.scrollHeight;
+              if (prev && itemRole.get(prev) === 'user') {
+                // 直前も user → 同じ root にぶら下げる
+                rootId = itemRoot.get(prev) || prev;
+                itemRoot.set(it.id, rootId);
+
+                bubble = nodeByItem.get(rootId) || nodeByItem.get(prev);
+                if (bubble) {
+                  nodeByItem.set(it.id, bubble); // 同じDOMノードを共有
+                }
+
+                const arr = rootItems.get(rootId) || [rootId];
+                if (!arr.includes(it.id)) arr.push(it.id);
+                rootItems.set(rootId, arr);
+
+              } else {
+                // 新しいユーザー発話 → 新しい root
+                rootId = it.id;
+                itemRoot.set(it.id, rootId);
+                rootItems.set(rootId, [it.id]);
+
+                // speech_started で作った暫定バブルがあればそれを採用
+                if (provisionalUserBubble) {
+                  bubble = provisionalUserBubble;
+                  provisionalUserBubble = null;
+                  bubble.classList.remove('provisional');
+                  // 既に chat に append 済みなので、registerNode 内で二重 append されないように
+                  registerNode(it.id, bubble, prev);
+                } else {
+                  // 暫定が無ければ今まで通り新規作成
+                  bubble = document.createElement('div');
+                  bubble.className = 'message user streaming';
+                  bubble.textContent = '…';
+                  registerNode(it.id, bubble, prev);
+                }
+              }
+
+              userTextByItem.set(it.id, "");
+              chat.scrollTop = chat.scrollHeight;
+            }
           }
-          // ▲▲▲ 追記ここまで ▲▲▲
+          // ▲▲▲ ここまで ▲▲▲
 
-          // 発話開始で緑の streaming 吹き出しを即座に表示（item.createdより先行する場合のフォールバック）
+          // 発話開始時（DOMは conversation.item.created 側で作成する）
           if (parsed.type === "input_audio_buffer.speech_started") {
-            let bubble = chat.querySelector('.message.user.streaming');
+            // ★既に「肉付け中のユーザーターン」がある、または
+            // 使われてない暫定バブルが残っている場合は
+            // → 新しい「…」バブルは作らない（＝同じバブルを使い続ける）
+            if (activeUserRootId || provisionalUserBubble) {
+              return;
+            }
+
+            window._userBuffer = "";
+
+            // 新しい暫定バブルを即時表示
+            const bubble = document.createElement('div');
+            bubble.className = 'message user streaming provisional';
+            bubble.textContent = '…';
+            chat.appendChild(bubble);
+            chat.scrollTop = chat.scrollHeight;
+            provisionalUserBubble = bubble;
+          }
+
+          // if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
+          //   window._userBuffer += parsed.delta;
+          //   let bubble = chat.querySelector('.message.user.streaming');
+          //   if (!bubble) {
+          //     bubble = document.createElement('div');
+          //     bubble.className = 'message user streaming';
+          //     chat.appendChild(bubble);
+          //   }
+          //   bubble.textContent = window._userBuffer.trim();
+          //   chat.scrollTop = chat.scrollHeight;
+          // }
+          // else if (parsed.type === "input_audio_buffer.transcription.completed" && parsed.transcription) {
+          //   window._userBuffer = parsed.transcription;
+          //   let bubble = chat.querySelector('.message.user.streaming');
+          //   if (!bubble) {
+          //     bubble = document.createElement('div');
+          //     bubble.className = 'message user streaming';
+          //     chat.appendChild(bubble);
+          //   }
+          //   bubble.textContent = window._userBuffer.trim();
+          //   bubble.classList.remove('streaming');
+          //   lastUserFinalEl = bubble;
+          //   chat.scrollTop = chat.scrollHeight;
+          // }
+          // ▼▼▼ WebRTC互換イベント：delta 単位で「itemごと」に更新し、root で再計算 ▼▼▼
+          else if (parsed.type === "conversation.item.input_audio_transcription.delta" && parsed.delta) {
+            const { item_id, delta } = parsed;
+
+            // 念のため role が user 以外なら無視
+            if (itemRole.get(item_id) !== 'user') {
+              return;
+            }
+
+            // どのルートメッセージ（＝1つの緑バブル）に属するか
+            const rootId = itemRoot.get(item_id) || item_id;
+            activeUserRootId = rootId;
+
+            // ルートに対応するバブルを取得
+            let bubble = nodeByItem.get(rootId);
+
+            // まだバブルが紐づいていない＆暫定バブルがある場合は
+            // 暫定バブルを「正式バブル」として昇格させる
+            if (!bubble && provisionalUserBubble) {
+              bubble = provisionalUserBubble;
+              provisionalUserBubble = null;
+
+              nodeByItem.set(rootId, bubble);
+              nodeByItem.set(item_id, bubble);
+            }
+
+            // それでも見つからない場合の保険
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message user streaming';
               bubble.textContent = '…';
-              chat.appendChild(bubble);
+              registerNode(rootId, bubble, null);
+              nodeByItem.set(rootId, bubble);
+              nodeByItem.set(item_id, bubble);
             }
-            chat.scrollTop = chat.scrollHeight;
-          }
 
-          if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
-            window._userBuffer += parsed.delta;
-            let bubble = chat.querySelector('.message.user.streaming');
-            if (!bubble) {
-              bubble = document.createElement('div');
-              bubble.className = 'message user streaming';
-              chat.appendChild(bubble);
+            // ★ 1) item 単位でテキストを更新（ここでは item_id ごとに持つ）
+            const prevItemText = userTextByItem.get(item_id) || "";
+            const newItemText = prevItemText + delta;
+            userTextByItem.set(item_id, newItemText);
+
+            // ★ 2) root 配下の item を順番に連結して、バブル全体テキストを再計算
+            const chain = rootItems.get(rootId) || [rootId];
+            let merged = "";
+            for (const id of chain) {
+              merged += (userTextByItem.get(id) || "");
             }
-            bubble.textContent = window._userBuffer.trim();
-            chat.scrollTop = chat.scrollHeight;
-          }
-          else if (parsed.type === "input_audio_buffer.transcription.completed" && parsed.transcription) {
-            window._userBuffer = parsed.transcription;
-            let bubble = chat.querySelector('.message.user.streaming');
-            if (!bubble) {
-              bubble = document.createElement('div');
-              bubble.className = 'message user streaming';
-              chat.appendChild(bubble);
-            }
-            bubble.textContent = window._userBuffer.trim();
-            bubble.classList.remove('streaming');
-            lastUserFinalEl = bubble;
-            chat.scrollTop = chat.scrollHeight;
-          }
-          // ▼▼▼ WebRTC互換イベント（ユーザー確定文の上書き先を item_id で特定） ▼▼▼
-          else if (parsed.type === "conversation.item.input_audio_transcription.delta" && parsed.delta) {
-            window._userBuffer += parsed.delta;
-            let bubble = nodeByItem.get(parsed.item_id);
-            if (!bubble) {
-              // 互換：未登録なら暫定 streaming を末尾に
-              bubble = chat.querySelector('.message.user.streaming') || document.createElement('div');
-              bubble.className = 'message user streaming';
-              if (!bubble.parentNode) chat.appendChild(bubble);
-              nodeByItem.set(parsed.item_id, bubble);
-            }
-            bubble.textContent = window._userBuffer.trim();
+
+            bubble.textContent = merged || '…';
             chat.scrollTop = chat.scrollHeight;
           }
           else if (parsed.type === "conversation.item.input_audio_transcription.completed" && parsed.transcript) {
-            window._userBuffer = parsed.transcript;
-            let bubble = nodeByItem.get(parsed.item_id);
-            if (!bubble) {
-              bubble = chat.querySelector('.message.user.streaming') || document.createElement('div');
-              bubble.className = 'message user streaming';
-              if (!bubble.parentNode) chat.appendChild(bubble);
-              nodeByItem.set(parsed.item_id, bubble);
+            const itemId = parsed.item_id;
+
+            // user 以外の completed は無視
+            if (itemRole.get(itemId) !== 'user') {
+              return;
             }
-            bubble.textContent = window._userBuffer.trim();
-            bubble.classList.remove('streaming');
-            lastUserFinalEl = bubble; // 既存互換
-            chat.scrollTop = chat.scrollHeight;
+
+            // ★ この item のテキストを「最終 transcript で上書き」
+            userTextByItem.set(itemId, parsed.transcript || "");
+
+            const rootId = itemRoot.get(itemId) || itemId;
+            const bubble = nodeByItem.get(rootId);
+            if (bubble) {
+              // root 配下の item たちを順番に連結して確定テキストにする
+              const chain = rootItems.get(rootId) || [rootId];
+              let merged = "";
+              for (const id of chain) {
+                merged += (userTextByItem.get(id) || "");
+              }
+              bubble.textContent = merged.trim();
+              bubble.classList.remove('streaming');
+              lastUserFinalEl = bubble; // 既存互換
+              chat.scrollTop = chat.scrollHeight;
+            }
           }
 
           // ✅ AI応答 吹き出し用バッファ
