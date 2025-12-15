@@ -82,6 +82,9 @@
     const rootItems = new Map();         // root item_id -> [item_id, ...]（同じ吹き出しに統合される順序）
     const userTextByItem = new Map();    // item_id -> transcript
 
+    // ★追加：AI応答（赤吹き出し）を item ごとに分離して保持（過去分が混ざるのを防止）
+    const aiTextByItem = new Map();      // item_id -> transcript buffer
+
     function insertAfterAnchor(node, previousId) {
       const anchor = nodeByItem.get(previousId);
       if (anchor && anchor.parentNode) {
@@ -257,11 +260,15 @@
                 provisionalUserBubble = null;
               }
 
-              // この後の user 用の処理はスキップしたいので return
-              // （もしアシスタント側のDOM生成をここでやっている場合は、
-              //  return の代わりに「assistant用の既存処理」をこの下に書く）
-              // いま貼っていただいたコードは user 用だけだったので、
-              // 今回は return でOK
+              // ★追加：AIの新規吹き出しをここで生成し、itemごとのバッファを初期化
+              aiTextByItem.set(it.id, "");
+              const bubble = document.createElement('div');
+              bubble.className = 'message ai streaming';
+              bubble.textContent = '…';
+              registerNode(it.id, bubble, prev);
+              chat.scrollTop = chat.scrollHeight;
+
+              // この後の user 用の処理はスキップ
               return;
             }
 
@@ -314,10 +321,9 @@
 
           // 発話開始時（DOMは conversation.item.created 側で作成する）
           if (parsed.type === "input_audio_buffer.speech_started") {
-            // ★既に「肉付け中のユーザーターン」がある、または
-            // 使われてない暫定バブルが残っている場合は
-            // → 新しい「…」バブルは作らない（＝同じバブルを使い続ける）
-            if (activeUserRootId || provisionalUserBubble) {
+            // ★修正ポイント：activeUserRootId は無視し、
+            // 既に暫定バブルがある場合だけ新規生成を抑止
+            if (provisionalUserBubble) {
               return;
             }
 
@@ -332,30 +338,6 @@
             provisionalUserBubble = bubble;
           }
 
-          // if (parsed.type === "input_audio_buffer.transcription.delta" && parsed.delta) {
-          //   window._userBuffer += parsed.delta;
-          //   let bubble = chat.querySelector('.message.user.streaming');
-          //   if (!bubble) {
-          //     bubble = document.createElement('div');
-          //     bubble.className = 'message user streaming';
-          //     chat.appendChild(bubble);
-          //   }
-          //   bubble.textContent = window._userBuffer.trim();
-          //   chat.scrollTop = chat.scrollHeight;
-          // }
-          // else if (parsed.type === "input_audio_buffer.transcription.completed" && parsed.transcription) {
-          //   window._userBuffer = parsed.transcription;
-          //   let bubble = chat.querySelector('.message.user.streaming');
-          //   if (!bubble) {
-          //     bubble = document.createElement('div');
-          //     bubble.className = 'message user streaming';
-          //     chat.appendChild(bubble);
-          //   }
-          //   bubble.textContent = window._userBuffer.trim();
-          //   bubble.classList.remove('streaming');
-          //   lastUserFinalEl = bubble;
-          //   chat.scrollTop = chat.scrollHeight;
-          // }
           // ▼▼▼ WebRTC互換イベント：delta 単位で「itemごと」に更新し、root で再計算 ▼▼▼
           else if (parsed.type === "conversation.item.input_audio_transcription.delta" && parsed.delta) {
             const { item_id, delta } = parsed;
@@ -434,32 +416,36 @@
             }
           }
 
-          // ✅ AI応答 吹き出し用バッファ
-          if (!window._aiBuffer) window._aiBuffer = "";
-
+          // ✅ AI応答（赤吹き出し）：itemごとにバッファを分離して更新（過去分混入バグを防止）
           if (parsed.type === "response.audio_transcript.delta" && parsed.delta) {
-            window._aiBuffer += parsed.delta;
-            let bubble = nodeByItem.get(parsed.item_id);
+            const id = parsed.item_id;
+            const prev = aiTextByItem.get(id) || "";
+            const next = prev + parsed.delta;
+            aiTextByItem.set(id, next);
+
+            let bubble = nodeByItem.get(id);
             if (!bubble) {
               // 互換：通常は先に conversation.item.created が来るが、未登録時は暫定作成
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
               chat.appendChild(bubble);
-              nodeByItem.set(parsed.item_id, bubble);
+              nodeByItem.set(id, bubble);
             }
-            bubble.textContent = window._aiBuffer.trim();
+            bubble.textContent = next.trim();
             chat.scrollTop = chat.scrollHeight;
           }
           else if (parsed.type === "response.audio_transcript.done" && parsed.transcript) {
-            window._aiBuffer = parsed.transcript;
-            let bubble = nodeByItem.get(parsed.item_id);
+            const id = parsed.item_id;
+            aiTextByItem.set(id, parsed.transcript || "");
+
+            let bubble = nodeByItem.get(id);
             if (!bubble) {
               bubble = document.createElement('div');
               bubble.className = 'message ai streaming';
               chat.appendChild(bubble);
-              nodeByItem.set(parsed.item_id, bubble);
+              nodeByItem.set(id, bubble);
             }
-            bubble.textContent = window._aiBuffer.trim();
+            bubble.textContent = (parsed.transcript || "").trim();
             bubble.classList.remove('streaming');
             chat.scrollTop = chat.scrollHeight;
           }
