@@ -1,7 +1,7 @@
 # 個別指定
 env.py
 ng_Azure_v0.1_実行不可.py
-ok_OpenAI_v0.1_途切れあり.py
+ok_OpenAI_*.py
 ok_Azure_*
 test_Azure_*.py
 interview.html

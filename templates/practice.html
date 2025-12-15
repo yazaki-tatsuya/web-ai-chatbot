@@ -55,9 +55,22 @@
 </head>
 <body>
   <h3>Realtime Audio Chat (JWT直結)</h3>
+    <div class="container" style="max-width: 900px;">
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <div>
+        <h4 class="mb-0">{{ session.scenario_title }}</h4>
+        <div class="text-muted small">session: {{ session.id }}</div>
+      </div>
+      <div class="d-flex gap-2">
+        <button id="toggle-devlog" class="btn btn-outline-secondary btn-sm">開発ログ</button>
+        <a class="btn btn-outline-secondary btn-sm" href="/home">Home</a>
+        <button id="end-btn" class="btn btn-danger btn-sm">終了→保存</button>
+      </div>
+    </div>
+  </div>
   <div class="mb-3">
     <!-- ▼▼ 追加(1/2)：プロンプト入力欄 ▼▼ -->
-    <textarea id="prompt" class="form-control mb-2" rows="3" placeholder="ここにシナリオ/設定（システムプロンプト）を入力してください。例：あなたは厳しめの英会話コーチです。短文で返答し、毎回1文だけ添削してください。"></textarea>
+   <textarea id="prompt" class="form-control mb-2" rows="3" placeholder="ここにシナリオ/設定（システムプロンプト）を入力してください。">{{ instructions }}</textarea>
     <!-- ▲▲ 追加(1/2) ここまで ▲▲ -->
     <button id="start-btn" class="btn btn-primary">Realtime開始</button>
   </div>
@@ -69,6 +82,10 @@
     let pc, dataChannel;
     let lastUserFinalEl = null; // 既存変数は残置（下位互換のため）
     let provisionalUserBubble = null;   // speech_started 直後に出す暫定バブル
+
+    // ★追加：保存用（session_id は server 側の変数名差異に備えて or で吸収）
+    const SESSION_ID = "{{ session_id or session.id }}";
+    const transcriptLog = []; // {role,text,ts}
 
     // ★追加：今「誰のユーザーターン」を肉付け中か
     let activeUserRootId = null;    
@@ -414,6 +431,10 @@
               lastUserFinalEl = bubble; // 既存互換
               chat.scrollTop = chat.scrollHeight;
             }
+
+            // ★追加：ユーザー確定発話をログ保存用に保持
+            const t = (parsed.transcript || "").trim();
+            if (t) transcriptLog.push({ role: "user", text: t, ts: Date.now() });
           }
 
           // ✅ AI応答（赤吹き出し）：itemごとにバッファを分離して更新（過去分混入バグを防止）
@@ -448,6 +469,10 @@
             bubble.textContent = (parsed.transcript || "").trim();
             bubble.classList.remove('streaming');
             chat.scrollTop = chat.scrollHeight;
+
+            // ★追加：AI確定発話をログ保存用に保持
+            const t = (parsed.transcript || "").trim();
+            if (t) transcriptLog.push({ role: "assistant", text: t, ts: Date.now() });
           }
           else {
             console.debug("📘 他イベント:", parsed.type);
@@ -490,7 +515,22 @@
       return offer;
     }
 
+    async function endAndSave(){
+      const payload = { ended_at: Date.now(), transcript: transcriptLog };
+      const res = await fetch(`/api/session/${SESSION_ID}/transcript`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      if(res.ok){
+        location.href = `/feedback/${SESSION_ID}`;
+      } else {
+        appendStatus("保存失敗: " + res.status);
+      }
+    }
+
     document.getElementById('start-btn').addEventListener('click', startRealtime);
+    document.getElementById('end-btn').addEventListener('click', endAndSave);
   </script>
 </body>
 </html>
