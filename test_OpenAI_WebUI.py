@@ -18,6 +18,9 @@ import queue
 from session_store import InMemorySessionStore
 store = InMemorySessionStore()
 
+# 🟩【追加】SessionState モジュール読み込み（ここだけ追加）
+from session_state import client_states, init_client_state, cleanup_client_state, get_client_state
+
 # Flaskアプリケーションの設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -26,27 +29,6 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 # OpenAI用の環境変数取得
 key = os.environ.get("OPEN_AI_KEY")
 url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
-
-# クライアントごとの状態を管理する辞書
-client_states = {}
-
-def init_client_state(sid):
-    client_states[sid] = {
-        "audio_receive_queue": queue.Queue(),
-        "audio_worker_started": False,
-        "audio_worker_lock": threading.Lock(),
-        "ws_connection": None,
-        "ws_lock": threading.Lock(),
-        "user_transcription_buffer": "",
-        "last_ai_message": "",
-        "current_turn": 0,
-        "ai_transcription_buffer": "",
-        "audio_pcm_buffer": bytearray(),  # AI音声PCMバッファを初期化
-    }
-
-def cleanup_client_state(sid):
-    if sid in client_states:
-        del client_states[sid]
 
 @app.route('/')
 def index():
