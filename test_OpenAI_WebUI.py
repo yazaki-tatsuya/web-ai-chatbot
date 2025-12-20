@@ -9,10 +9,14 @@ load_dotenv()  # .env を読み込む（ローカル用）
 import json
 import threading
 import base64
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_socketio import SocketIO, emit
 import websocket
 import queue
+
+# 追加
+from session_store import InMemorySessionStore
+store = InMemorySessionStore()
 
 # Flaskアプリケーションの設定
 app = Flask(__name__)
@@ -46,7 +50,54 @@ def cleanup_client_state(sid):
 
 @app.route('/')
 def index():
-    return render_template('index_realtime.html')
+    session_id = request.args.get("session_id")
+    meta = store.get_session(session_id) if session_id else None
+    if not meta:
+        meta = store.create_session("free_talk")  # 直アクセスでも壊さない
+        session_id = meta.session_id
+
+    return render_template(
+        'practice.html',
+        session_id=session_id,
+        scenario_title=meta.title,
+        instructions=meta.instructions
+    )
+
+@app.route("/home")
+def home():
+    return render_template("home.html")
+
+@app.route("/modes")
+def modes():
+    return render_template("modes.html", modes=store.list_modes())
+
+@app.route("/scenarios")
+def scenarios():
+    mode = request.args.get("mode")
+    return render_template("scenarios.html", scenarios=store.list_scenarios(mode), mode=mode)
+
+@app.post("/session/start")
+def session_start():
+    scenario_id = request.form.get("scenario_id", "free_talk")
+    instructions = (request.form.get("instructions") or "").strip() or None
+    meta = store.create_session(scenario_id, instructions)
+    return redirect(url_for("index", session_id=meta.session_id))
+
+@app.route("/history")
+def history():
+    return render_template("history.html", sessions=store.list_sessions())
+
+@app.route("/feedback/<session_id>")
+def feedback(session_id):
+    meta = store.get_session(session_id)
+    log = store.get_transcript(session_id)
+    return render_template("feedback.html", meta=meta, log=log, session_id=session_id)
+
+@app.post("/api/session/<session_id>/transcript")
+def api_save_transcript(session_id):
+    payload = request.get_json(force=True)
+    ok = store.save_transcript(session_id, payload)
+    return jsonify({"ok": ok}), (200 if ok else 404)
 
 def on_message(ws, message, sid):
     try:
