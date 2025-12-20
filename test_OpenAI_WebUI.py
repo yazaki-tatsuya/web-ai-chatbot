@@ -18,9 +18,6 @@ import queue
 from session_store import InMemorySessionStore
 store = InMemorySessionStore()
 
-# 🟩【追加】SessionState モジュール読み込み（ここだけ追加）
-from session_state import client_states, init_client_state, cleanup_client_state, get_client_state
-
 # Flaskアプリケーションの設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -30,6 +27,57 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 key = os.environ.get("OPEN_AI_KEY")
 url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
+# クライアントごとの状態を管理する辞書
+client_states = {}
+
+def init_client_state(sid):
+    client_states[sid] = {
+        "audio_receive_queue": queue.Queue(),
+        "audio_worker_started": False,
+        "audio_worker_lock": threading.Lock(),
+        "ws_connection": None,
+        "ws_lock": threading.Lock(),
+        "user_transcription_buffer": "",
+        "last_ai_message": "",
+        "current_turn": 0,
+        "ai_transcription_buffer": "",
+        "audio_pcm_buffer": bytearray(),  # AI音声PCMバッファを初期化
+    }
+
+def cleanup_client_state(sid):
+    if sid in client_states:
+        del client_states[sid]
+
+def _make_session_view(meta, session_id=None):
+    """
+    templates 側（practice.html / feedback.html）が期待する
+    session.id / session.scenario_title 形式に合わせるための薄い変換。
+    """
+    if not meta and not session_id:
+        return None
+
+    sid = session_id
+    title = ""
+
+    if meta:
+        # meta がオブジェクトでもdictでも落ちないように
+        try:
+            sid = sid or getattr(meta, "session_id", None) or getattr(meta, "id", None)
+        except Exception:
+            pass
+        try:
+            title = getattr(meta, "title", "") or getattr(meta, "scenario_title", "")
+        except Exception:
+            pass
+        if isinstance(meta, dict):
+            sid = sid or meta.get("session_id") or meta.get("id")
+            title = title or meta.get("title") or meta.get("scenario_title") or ""
+
+    return {
+        "id": sid,
+        "scenario_title": title,
+    }
+
 @app.route('/')
 def index():
     session_id = request.args.get("session_id")
@@ -38,11 +86,33 @@ def index():
         meta = store.create_session("free_talk")  # 直アクセスでも壊さない
         session_id = meta.session_id
 
+    # ★追加：templates が期待する session も渡す（既存変数は維持）
+    session_view = _make_session_view(meta, session_id=session_id)
+
     return render_template(
         'practice.html',
         session_id=session_id,
         scenario_title=meta.title,
-        instructions=meta.instructions
+        instructions=meta.instructions,
+        session=session_view
+    )
+
+# ★追加：feedback.html の「同じシナリオで再挑戦」リンク対応
+@app.route('/practice/<session_id>')
+def practice(session_id):
+    meta = store.get_session(session_id) if session_id else None
+    if not meta:
+        meta = store.create_session("free_talk")  # 壊さない
+        session_id = meta.session_id
+
+    session_view = _make_session_view(meta, session_id=session_id)
+
+    return render_template(
+        'practice.html',
+        session_id=session_id,
+        scenario_title=meta.title,
+        instructions=meta.instructions,
+        session=session_view
     )
 
 @app.route("/home")
@@ -73,7 +143,21 @@ def history():
 def feedback(session_id):
     meta = store.get_session(session_id)
     log = store.get_transcript(session_id)
-    return render_template("feedback.html", meta=meta, log=log, session_id=session_id)
+
+    # ★追加：feedback.html が期待する変数名に合わせて渡す（既存は残す）
+    session_view = _make_session_view(meta, session_id=session_id)
+    transcript = log
+    feedback_data = None
+
+    return render_template(
+        "feedback.html",
+        meta=meta,
+        log=log,
+        session_id=session_id,
+        session=session_view,
+        transcript=transcript,
+        feedback=feedback_data
+    )
 
 @app.post("/api/session/<session_id>/transcript")
 def api_save_transcript(session_id):
