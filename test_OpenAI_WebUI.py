@@ -21,6 +21,12 @@ store = InMemorySessionStore()
 
 # Flaskアプリケーションの設定
 app = Flask(__name__)
+
+try:
+    app.json.ensure_ascii = False   # Flask 2.2+ 系
+except Exception:
+    app.config['JSON_AS_ASCII'] = False  # 旧Flask互換
+    
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
@@ -52,7 +58,8 @@ def cleanup_client_state(sid):
 def _make_session_view(meta, session_id=None):
     """
     templates 側（practice.html / feedback.html）が期待する
-    session.id / session.scenario_title 形式に合わせるための薄い変換。
+    session.id / session.scenario_title 形式に合わせて
+    session.id / session.scenario_title 形式に合わせて session を追加で渡す
     """
     if not meta and not session_id:
         return None
@@ -248,7 +255,7 @@ def feedback(session_id):
     # ★追加：feedback.html が期待する変数名に合わせて渡す（既存は残す）
     session_view = _make_session_view(meta, session_id=session_id)
     transcript = log
-    feedback_data = None
+    feedback_data = store.get_feedback(session_id)  # ★変更：保存済みフィードバックを取得
 
     return render_template(
         "feedback.html",
@@ -265,6 +272,125 @@ def api_save_transcript(session_id):
     payload = request.get_json(force=True)
     ok = store.save_transcript(session_id, payload)
     return jsonify({"ok": ok}), (200 if ok else 404)
+
+# ▼▼▼ 追加：フィードバック生成API（最小差分で追加） ▼▼▼
+def _generate_feedback_with_openai(meta, transcript):
+    """
+    transcript（list[dict]）から簡易フィードバックを生成する。
+    - 失敗時は {"error": "..."} を返す
+    - 成功時は dict（JSONにできる形）を返す
+    """
+    try:
+        import requests
+
+        api_key = os.environ.get("OPEN_AI_KEY") or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return {"error": "OPEN_AI_KEY (or OPENAI_API_KEY) が設定されていません"}
+
+        model = os.environ.get("FEEDBACK_MODEL") or "gpt-4o-mini"
+
+        title = ""
+        instructions = ""
+        try:
+            title = getattr(meta, "title", "") or ""
+        except Exception:
+            title = ""
+        try:
+            instructions = getattr(meta, "instructions", "") or ""
+        except Exception:
+            instructions = ""
+
+        def _clip(s, n=500):
+            s = s or ""
+            return s if len(s) <= n else s[:n] + "…"
+
+        lines = []
+        for t in transcript:
+            role = (t.get("role") or "").strip()
+            text = (t.get("text") or "").strip()
+            if not role or not text:
+                continue
+            if role == "user":
+                lines.append(f"ユーザー: {_clip(text)}")
+            elif role == "assistant":
+                lines.append(f"AI: {_clip(text)}")
+            else:
+                lines.append(f"{role}: {_clip(text)}")
+
+        convo_text = "\n".join(lines)
+
+        system = (
+            "あなたは会話練習のコーチです。日本語で、短く具体的にフィードバックしてください。"
+            "相手を傷つけないトーンで、改善点は行動に落とせる形で提案してください。"
+        )
+        user = (
+            f"シナリオ: {title}\n"
+            f"追加指示: {instructions}\n\n"
+            "以下の会話ログを読んで、次のJSON形式で返してください。\n"
+            "{\n"
+            "  \"summary\": \"会話の要約（2〜4行）\",\n"
+            "  \"good_points\": [\"良かった点1\", \"良かった点2\"],\n"
+            "  \"improvements\": [\"改善点1（具体行動）\", \"改善点2（具体行動）\"],\n"
+            "  \"next_actions\": [\"次回の練習でやること1\", \"やること2\"],\n"
+            "  \"score\": 0\n"
+            "}\n\n"
+            "会話ログ:\n"
+            f"{convo_text}"
+        )
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.2,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
+        res.raise_for_status()
+        data = res.json()
+
+        content = None
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except Exception:
+            content = None
+
+        if isinstance(content, str) and content.strip():
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"text": content}
+            except Exception:
+                return {"text": content}
+
+        return {"error": "フィードバック生成に失敗しました（contentが空）"}
+
+    except Exception as e:
+        return {"error": f"フィードバック生成エラー: {e}"}
+
+
+@app.post("/api/session/<session_id>/feedback/generate")
+def api_generate_feedback(session_id):
+    meta = store.get_session(session_id)
+    if not meta:
+        return jsonify({"ok": False, "error": "session not found"}), 404
+
+    log = store.get_transcript(session_id) or {}
+    transcript = log.get("transcript") or []
+    if not transcript:
+        return jsonify({"ok": False, "error": "transcript is empty"}), 400
+
+    feedback_payload = _generate_feedback_with_openai(meta, transcript)
+    ok = store.save_feedback(session_id, feedback_payload)
+
+    return jsonify({"ok": ok, "feedback": feedback_payload}), (200 if ok else 404)
+# ▲▲▲ 追加ここまで ▲▲▲
 
 def on_message(ws, message, sid):
     try:
