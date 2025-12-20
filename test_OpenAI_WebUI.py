@@ -9,6 +9,7 @@ load_dotenv()  # .env を読み込む（ローカル用）
 import json
 import threading
 import base64
+from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_socketio import SocketIO, emit
 import websocket
@@ -78,6 +79,66 @@ def _make_session_view(meta, session_id=None):
         "scenario_title": title,
     }
 
+# ▼▼▼ 追加：templates（modes.html / scenarios.html / history.html）向けの薄い変換 ▼▼▼
+JST = timezone(timedelta(hours=9))
+
+def _make_scenario_view(s):
+    """
+    scenarios.html が期待する focus / duration_sec を補完する薄い変換。
+    store 側が未定義でもテンプレ側で落ちないようにする。
+    """
+    if isinstance(s, dict):
+        v = dict(s)
+    else:
+        v = {}
+        try:
+            v["id"] = getattr(s, "id", None)
+        except Exception:
+            v["id"] = None
+        try:
+            v["title"] = getattr(s, "title", "")
+        except Exception:
+            v["title"] = ""
+        try:
+            v["default_instructions"] = getattr(s, "default_instructions", "")
+        except Exception:
+            v["default_instructions"] = ""
+
+    if "focus" not in v or v.get("focus") is None:
+        v["focus"] = []
+    if not isinstance(v.get("focus"), list):
+        v["focus"] = [str(v.get("focus"))] if v.get("focus") else []
+
+    if "duration_sec" not in v or v.get("duration_sec") is None:
+        v["duration_sec"] = 300
+
+    return v
+
+def _make_mode_view(mode):
+    scenarios = [_make_scenario_view(x) for x in store.list_scenarios(mode)]
+    return {"mode": mode, "scenarios": scenarios}
+
+def _format_created_at(val):
+    """
+    history.html の created_at 表示用。
+    - epoch秒（int/float/数字文字列）なら JST に変換して "YYYY-MM-DD HH:MM"
+    - それ以外の文字列ならそのまま表示
+    """
+    if val is None:
+        return ""
+    try:
+        # 数字（epoch秒）として解釈できるならそれを優先
+        ts = int(float(val))
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(JST)
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        pass
+    try:
+        return str(val)
+    except Exception:
+        return ""
+# ▲▲▲ 追加ここまで ▲▲▲
+
 @app.route('/')
 def index():
     session_id = request.args.get("session_id")
@@ -121,12 +182,14 @@ def home():
 
 @app.route("/modes")
 def modes():
-    return render_template("modes.html", modes=store.list_modes())
+    return render_template("modes.html", modes=[_make_mode_view(m) for m in store.list_modes()])
 
 @app.route("/scenarios")
 def scenarios():
     mode = request.args.get("mode")
-    return render_template("scenarios.html", scenarios=store.list_scenarios(mode), mode=mode)
+    if not mode:
+        mode = "basic"
+    return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode)], mode=mode)
 
 @app.post("/session/start")
 def session_start():
@@ -137,7 +200,45 @@ def session_start():
 
 @app.route("/history")
 def history():
-    return render_template("history.html", sessions=store.list_sessions())
+    sessions_view = []
+    for s in store.list_sessions():
+        # s が dict / object どちらでも落ちないように
+        sid = ""
+        title = ""
+        created_at = None
+        mode = ""
+
+        if isinstance(s, dict):
+            sid = s.get("id") or s.get("session_id") or ""
+            title = s.get("scenario_title") or s.get("title") or ""
+            created_at = s.get("created_at")
+            mode = s.get("mode") or ""
+        else:
+            try:
+                sid = getattr(s, "id", "") or getattr(s, "session_id", "")
+            except Exception:
+                sid = ""
+            try:
+                title = getattr(s, "scenario_title", "") or getattr(s, "title", "")
+            except Exception:
+                title = ""
+            try:
+                created_at = getattr(s, "created_at", None)
+            except Exception:
+                created_at = None
+            try:
+                mode = getattr(s, "mode", "") or ""
+            except Exception:
+                mode = ""
+
+        sessions_view.append({
+            "id": sid,
+            "scenario_title": title,
+            "created_at": _format_created_at(created_at),
+            "mode": mode,
+        })
+
+    return render_template("history.html", sessions=sessions_view)
 
 @app.route("/feedback/<session_id>")
 def feedback(session_id):
