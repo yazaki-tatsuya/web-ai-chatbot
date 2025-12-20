@@ -54,6 +54,7 @@ class InMemorySessionStore:
         self._scenarios = scenarios or DEFAULT_SCENARIOS
         self._sessions: Dict[str, SessionMeta] = {}
         self._logs: Dict[str, Dict[str, Any]] = {}
+        self._feedback: Dict[str, Any] = {}  # 追加：フィードバック保存用
         self._lock = threading.Lock()
 
     # ---- scenario ----
@@ -115,3 +116,15 @@ class InMemorySessionStore:
     def get_transcript(self, session_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             return self._logs.get(session_id)
+
+    # ---- feedback ----
+    def save_feedback(self, session_id: str, payload: Any) -> bool:
+        with self._lock:
+            if session_id not in self._sessions:
+                return False
+            self._feedback[session_id] = payload
+        return True
+
+    def get_feedback(self, session_id: str) -> Any:
+        with self._lock:
+            return self._feedback.get(session_id)
