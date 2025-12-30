@@ -12,7 +12,56 @@
     <div class="card-body">
       <h5 class="card-title">まとめ（仮）</h5>
       {% if feedback %}
-        <pre class="mb-0">{{ feedback | tojson(indent=2) }}</pre>
+        {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.next_actions or feedback.score is not none %}
+          {% if feedback.summary %}
+            <div class="mb-3">
+              <div class="fw-semibold">要約</div>
+              <div>{{ feedback.summary }}</div>
+            </div>
+          {% endif %}
+
+          {% if feedback.score is not none %}
+            <div class="mb-3">
+              <div class="fw-semibold">スコア</div>
+              <div><span class="badge text-bg-primary">{{ feedback.score }}</span></div>
+            </div>
+          {% endif %}
+
+          {% if feedback.good_points %}
+            <div class="mb-3">
+              <div class="fw-semibold">良かった点</div>
+              <ul class="mb-0">
+                {% for x in feedback.good_points %}
+                  <li>{{ x }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if feedback.improvements %}
+            <div class="mb-3">
+              <div class="fw-semibold">改善点</div>
+              <ul class="mb-0">
+                {% for x in feedback.improvements %}
+                  <li>{{ x }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if feedback.next_actions %}
+            <div class="mb-0">
+              <div class="fw-semibold">次のアクション</div>
+              <ul class="mb-0">
+                {% for x in feedback.next_actions %}
+                  <li>{{ x }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        {% else %}
+          <pre class="mb-0">{{ feedback | pprint }}</pre>
+        {% endif %}
       {% else %}
         <div class="text-muted">まだフィードバックは生成されていません（次ステップでOpenAI評価に置き換えます）。</div>
       {% endif %}
