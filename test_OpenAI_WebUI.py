@@ -34,6 +34,13 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 key = os.environ.get("OPEN_AI_KEY")
 url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 
+# ============================================================
+# LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
+#  - 現在の推奨はブラウザはWebRTC直結（practice.html）なのでデフォルトOFF
+#  - 必要な場合のみ環境変数 ENABLE_LEGACY_OPENAI_WS=1 で有効化
+# ============================================================
+ENABLE_LEGACY_OPENAI_WS = os.environ.get("ENABLE_LEGACY_OPENAI_WS", "0") == "1"
+
 # クライアントごとの状態を管理する辞書
 client_states = {}
 
@@ -637,7 +644,10 @@ def handle_connect():
         if not state["audio_worker_started"]:
             # 音声再生ワーカーは現状未使用
             state["audio_worker_started"] = True
-    threading.Thread(target=start_websocket, args=(sid,), daemon=True).start()
+    if ENABLE_LEGACY_OPENAI_WS:
+        threading.Thread(target=start_websocket, args=(sid,), daemon=True).start()
+    else:
+        socketio.emit('status_message', {'message': "LEGACY OpenAI WebSocket経路は無効です（ENABLE_LEGACY_OPENAI_WS=1で有効化）"}, room=sid)
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -694,6 +704,9 @@ def realtime_sdp_proxy():
 def handle_audio_data(data):
     """音声チャンクをサーバーに送信（commitは分離イベントで実施）"""
     sid = request.sid
+    if not ENABLE_LEGACY_OPENAI_WS:
+        socketio.emit('status_message', {'message': "LEGACY経路は無効です（ENABLE_LEGACY_OPENAI_WS=1で有効化）"}, room=sid)
+        return
     state = client_states.get(sid)
     if not state:
         print(f"状態が見つかりません: {sid}")
@@ -728,6 +741,9 @@ def handle_audio_data(data):
 def handle_audio_commit():
     """前回送信済みの音声データを明示的にcommit"""
     sid = request.sid
+    if not ENABLE_LEGACY_OPENAI_WS:
+        socketio.emit('status_message', {'message': "LEGACY経路は無効です（ENABLE_LEGACY_OPENAI_WS=1で有効化）"}, room=sid)
+        return
     state = client_states.get(sid)
     if not state:
         print(f"状態が見つかりません: {sid}")
@@ -749,6 +765,9 @@ def handle_audio_commit():
 @socketio.on('start_process')
 def handle_start_process():
     sid = request.sid
+    if not ENABLE_LEGACY_OPENAI_WS:
+        socketio.emit('status_message', {'message': "LEGACY経路は無効です（ENABLE_LEGACY_OPENAI_WS=1で有効化）"}, room=sid)
+        return
     print(f"[start_process] クライアント {sid} から受信")
     # クライアント状態初期化（なければ）
     if sid not in client_states:
