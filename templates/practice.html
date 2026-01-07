@@ -242,7 +242,7 @@
               threshold: 0.5,
               // 「無音がこのくらい続いたら1発話として区切る」の秒数イメージ
               // 値を小さくすると、短い間でも小刻みに区切ってくれる（＝テキストも早く出やすい）
-              // silence_duration_ms: 300,      // ここを 300ms 前後に
+              silence_duration_ms: 100,      // ここを 300ms 前後に
               prefix_padding_ms: 300,        // 直前の音声も少しだけ巻き戻して含める
               idle_timeout_ms: null
             },
