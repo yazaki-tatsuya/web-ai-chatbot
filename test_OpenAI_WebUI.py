@@ -10,10 +10,11 @@ import json
 import threading
 import base64
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_socketio import SocketIO, emit
 import websocket
 import queue
+from functools import wraps
 
 # 追加
 from session_store import InMemorySessionStore
@@ -28,7 +29,65 @@ except Exception:
     app.config['JSON_AS_ASCII'] = False  # 旧Flask互換
     
 app.config['SECRET_KEY'] = 'secret!'
+app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+# ============================================================
+# SEC-001: 簡易認可（PIN）
+#  - APP_PIN が設定されている場合のみ有効
+#  - 未設定なら従来通り（すべて許可）で挙動を変えない
+# ============================================================
+def _auth_enabled():
+    return bool(os.environ.get("APP_PIN"))
+
+def _is_authorized():
+    if not _auth_enabled():
+        return True
+    return session.get("authorized") is True
+
+def _unauthorized_response():
+    return jsonify({"ok": False, "error": "unauthorized", "login_url": url_for("login", next=request.path)}), 401
+
+def require_auth(fn):
+    @wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if _is_authorized():
+            return fn(*args, **kwargs)
+        return _unauthorized_response()
+    return _wrapper
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    # APP_PIN 未設定なら常に許可（既存のローカル運用を崩さない）
+    if not _auth_enabled():
+        session["authorized"] = True
+        return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+
+    if request.method == "POST":
+        pin = request.form.get("pin") or ""
+        if pin == os.environ.get("APP_PIN"):
+            session["authorized"] = True
+            return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+        return "<h3>Unauthorized</h3><p>PIN is incorrect.</p>", 401
+
+    next_url = request.args.get("next") or url_for("home")
+    return (
+        "<h2>Login</h2>"
+        "<form method='post'>"
+        f"<input type='hidden' name='next' value='{next_url}'>"
+        "<div><input name='pin' type='password' placeholder='PIN'></div>"
+        "<div><button type='submit'>Login</button></div>"
+        "</form>"
+    )
+
+@app.route("/logout")
+def logout():
+    try:
+        session.clear()
+    except Exception:
+        session["authorized"] = False
+    return redirect(url_for("home"))
 
 # OpenAI用の環境変数取得
 key = os.environ.get("OPEN_AI_KEY")
@@ -275,6 +334,7 @@ def feedback(session_id):
     )
 
 @app.post("/api/session/<session_id>/transcript")
+@require_auth
 def api_save_transcript(session_id):
     payload = request.get_json(force=True)
     ok = store.save_transcript(session_id, payload)
@@ -383,6 +443,7 @@ def _generate_feedback_with_openai(meta, transcript):
 
 
 @app.post("/api/session/<session_id>/feedback/generate")
+@require_auth
 def api_generate_feedback(session_id):
     meta = store.get_session(session_id)
     if not meta:
@@ -667,6 +728,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "local-dev-secret")
 JWT_EXP_SECONDS = 300  # トークン有効期限5分
 
 @app.route("/jwt", methods=["GET"])
+@require_auth
 def issue_jwt_token():
     """Realtime API に直接接続するための一時JWTを発行"""
     payload = {
@@ -683,6 +745,7 @@ def issue_jwt_token():
 # ✅ SDP Proxyエンドポイント（CORS回避用）
 # ============================================================
 @app.route("/realtime/sdp-proxy", methods=["POST"])
+@require_auth
 def realtime_sdp_proxy():
     """ブラウザのSDP Offerを安全に中継してCORSを回避"""
     try:
