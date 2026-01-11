@@ -88,7 +88,33 @@
     const transcriptLog = []; // {role,text,ts}
 
     // ★追加：今「誰のユーザーターン」を肉付け中か
-    let activeUserRootId = null;    
+    let activeUserRootId = null;
+
+    // ★追加：手動 response.create 用（1000ms無音でAI発話）
+    let responseCreateTimer = null;
+    let responseInFlight = false;
+
+    function clearResponseTimer(){
+      if (responseCreateTimer) {
+        clearTimeout(responseCreateTimer);
+        responseCreateTimer = null;
+      }
+    }
+
+    function scheduleResponseCreate(){
+      clearResponseTimer();
+      responseCreateTimer = setTimeout(() => {
+        try {
+          if (dataChannel && dataChannel.readyState === "open" && !responseInFlight) {
+            dataChannel.send(JSON.stringify({ type: "response.create" }));
+            responseInFlight = true;
+            appendStatus("response.create を送信（1000ms無音で手動開始）");
+          }
+        } catch (e) {
+          console.error("response.create 送信失敗:", e);
+        }
+      }, 1000);
+    }
 
     // ▼▼ 追記：item順序制御用のマップと挿入ヘルパ ▼▼
     const nodeByItem = new Map();        // item_id -> DOMノード
@@ -138,7 +164,7 @@
     }
     // ▲▲ 追記ここまで ▲▲
 
-    async function appendStatus(msg){ 
+    async function appendStatus(msg){
       const div = document.createElement('div');
       div.textContent = "> " + msg;
       statusArea.appendChild(div);
@@ -248,9 +274,12 @@
               threshold: 0.5,
               // 「無音がこのくらい続いたら1発話として区切る」の秒数イメージ
               // 値を小さくすると、短い間でも小刻みに区切ってくれる（＝テキストも早く出やすい）
-              silence_duration_ms: 300,      // ここを 300ms 前後に
+              silence_duration_ms: 30,      // ここを 300ms 前後に
               prefix_padding_ms: 300,        // 直前の音声も少しだけ巻き戻して含める
-              idle_timeout_ms: null
+              idle_timeout_ms: null,
+              // ★追加：自動でAI応答を作らない（1000ms無音で手動 response.create する）
+              create_response: false,
+              interrupt_response: false
             },
             instructions: userInstructions
           }
@@ -258,7 +287,7 @@
         dataChannel.send(JSON.stringify(update));
         appendStatus("session.update を送信（WebRTC, with instructions）");
       };
-      // ----------------------------------------------------------------------- //  
+      // ----------------------------------------------------------------------- //
 
       dataChannel.onmessage = (event) => {
         const msg = event.data;
@@ -344,6 +373,9 @@
 
           // 発話開始時（DOMは conversation.item.created 側で作成する）
           if (parsed.type === "input_audio_buffer.speech_started") {
+            // ★追加：1000ms 無音タイマーを止める（まだユーザーターン継続）
+            clearResponseTimer();
+
             // ★修正ポイント：activeUserRootId は無視し、
             // 既に暫定バブルがある場合だけ新規生成を抑止
             if (provisionalUserBubble) {
@@ -359,6 +391,11 @@
             chat.appendChild(bubble);
             chat.scrollTop = chat.scrollHeight;
             provisionalUserBubble = bubble;
+          }
+
+          // ★追加：VADが「一旦止まった(=100ms無音)」を検知したら、1000msでAI開始を予約
+          if (parsed.type === "input_audio_buffer.speech_stopped") {
+            scheduleResponseCreate();
           }
 
           // ▼▼▼ WebRTC互換イベント：delta 単位で「itemごと」に更新し、root で再計算 ▼▼▼
@@ -480,6 +517,12 @@
             const t = (parsed.transcript || "").trim();
             if (t) transcriptLog.push({ role: "assistant", text: t, ts: Date.now() });
           }
+
+          // ★追加：レスポンス終了で inFlight を解除（次の1000ms無音でまた開始できる）
+          if (parsed.type === "response.done") {
+            responseInFlight = false;
+          }
+
           else {
             console.debug("📘 他イベント:", parsed.type);
           }
