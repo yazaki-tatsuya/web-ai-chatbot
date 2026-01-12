@@ -73,7 +73,25 @@
       <h5 class="card-title">会話ログ</h5>
       {% if transcript and transcript.transcript %}
         <div class="small">
+          {# 連続する同一roleを結合して、Practiceの吹き出し単位（ターン単位）に寄せる #}
+          {% set ns = namespace(role=None, text='', out=[]) %}
           {% for m in transcript.transcript %}
+            {% if ns.role is none %}
+              {% set ns.role = m.role %}
+              {% set ns.text = m.text %}
+            {% elif m.role == ns.role %}
+              {% set ns.text = ns.text + m.text %}
+            {% else %}
+              {% set _ = ns.out.append({'role': ns.role, 'text': ns.text}) %}
+              {% set ns.role = m.role %}
+              {% set ns.text = m.text %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.role is not none %}
+            {% set _ = ns.out.append({'role': ns.role, 'text': ns.text}) %}
+          {% endif %}
+
+          {% for m in ns.out %}
             <div class="mb-2">
               <span class="badge text-bg-{% if m.role == 'user' %}success{% else %}danger{% endif %}">{{ m.role }}</span>
               <span class="ms-2">{{ m.text }}</span>
