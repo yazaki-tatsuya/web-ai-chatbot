@@ -129,6 +129,31 @@ class InMemorySessionStore:
         with self._lock:
             return self._feedback.get(session_id)
 
+    # ---- STG-002 ----
+    def delete_feedback(self, session_id: str) -> bool:
+        with self._lock:
+            if session_id in self._feedback:
+                del self._feedback[session_id]
+        return True
+
+    def list_feedback_sessions(self, limit: int = 200) -> List[Tuple[str, str, int, str]]:
+        """
+        生成済フィードバックが存在するセッションの一覧
+        return: [(session_id, title, created_at, mode), ...]
+        """
+        with self._lock:
+            ids = list(self._feedback.keys())
+
+            out: List[Tuple[str, str, int, str]] = []
+            for sid in ids:
+                meta = self._sessions.get(sid)
+                if not meta:
+                    continue
+                out.append((sid, meta.title, meta.created_at, meta.mode))
+
+        out.sort(key=lambda x: x[2], reverse=True)
+        return out[:limit]
+
 
 class SQLiteSessionStore:
     """
@@ -311,3 +336,29 @@ class SQLiteSessionStore:
             return json.loads(row[0])
         except Exception:
             return None
+
+    # ---- STG-002 ----
+    def delete_feedback(self, session_id: str) -> bool:
+        with self._lock:
+            self._conn.execute("DELETE FROM feedback WHERE session_id=?", (session_id,))
+            self._conn.commit()
+        return True
+
+    def list_feedback_sessions(self, limit: int = 200) -> List[Tuple[str, str, int, str]]:
+        """
+        生成済フィードバックが存在するセッションの一覧
+        return: [(session_id, title, created_at, mode), ...]
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT s.session_id, s.title, s.created_at, s.mode
+                FROM sessions s
+                INNER JOIN feedback f ON f.session_id = s.session_id
+                ORDER BY s.created_at DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+            rows = cur.fetchall()
+        return [(r[0], r[1], int(r[2]), r[3]) for r in rows]

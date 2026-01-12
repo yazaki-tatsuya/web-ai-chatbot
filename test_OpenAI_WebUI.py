@@ -167,6 +167,7 @@ def _make_scenario_view(s):
         try:
             v["id"] = getattr(s, "id", None)
         except Exception:
+            admit = None
             v["id"] = None
         try:
             v["title"] = getattr(s, "title", "")
@@ -312,6 +313,20 @@ def history():
         })
 
     return render_template("history.html", sessions=sessions_view)
+
+# ▼▼▼ STG-002: 生成済フィードバック一覧 ▼▼▼
+@app.route("/feedbacks")
+def feedbacks():
+    items = []
+    for sid, title, created_at, mode in store.list_feedback_sessions():
+        items.append({
+            "id": sid,
+            "scenario_title": title,
+            "created_at": _format_created_at(created_at),
+            "mode": mode,
+        })
+    return render_template("feedbacks.html", feedbacks=items)
+# ▲▲▲ 追加ここまで ▲▲▲
 
 @app.route("/feedback/<session_id>")
 def feedback(session_id):
@@ -549,6 +564,18 @@ def api_generate_feedback(session_id):
     ok = store.save_feedback(session_id, feedback_payload)
 
     return jsonify({"ok": ok, "feedback": feedback_payload}), (200 if ok else 404)
+# ▲▲▲ 追加ここまで ▲▲▲
+
+# ▼▼▼ STG-002: フィードバック削除API ▼▼▼
+@app.post("/api/session/<session_id>/feedback/delete")
+@require_auth
+def api_delete_feedback(session_id):
+    meta = store.get_session(session_id)
+    if not meta:
+        return jsonify({"ok": False, "error": "session not found"}), 404
+
+    ok = store.delete_feedback(session_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
 # ▲▲▲ 追加ここまで ▲▲▲
 
 def on_message(ws, message, sid):
