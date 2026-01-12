@@ -1,11 +1,21 @@
-<!doctype html><html lang="ja"><head>
+<!doctype html>
+<html lang="ja">
+<head>
   <meta charset="utf-8" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
   <title>履歴</title>
-</head><body class="bg-light">
+</head>
+<body class="bg-light">
 <div class="container py-4">
   <a href="/" class="text-decoration-none">← Home</a>
-  <h3 class="mt-2">履歴</h3>
+
+  <div class="d-flex justify-content-between align-items-center mt-2">
+    <h3 class="mb-0">履歴</h3>
+    <!-- ★ STG-002 追加：フィードバック一覧への導線 -->
+    <a href="/feedbacks" class="btn btn-sm btn-outline-secondary">
+      フィードバック一覧
+    </a>
+  </div>
 
   <div class="list-group mt-3">
     {% for s in sessions %}
@@ -24,4 +34,5 @@
     {% endfor %}
   </div>
 </div>
-</body></html>
+</body>
+</html>
