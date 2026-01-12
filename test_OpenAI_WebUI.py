@@ -417,9 +417,20 @@ def _generate_feedback_with_openai(meta, transcript):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
-        res.raise_for_status()
-        data = res.json()
+        data = None
+        last_err = None
+        for _ in range(2):
+            try:
+                res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
+                res.raise_for_status()
+                data = res.json()
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                data = None
+        if last_err is not None:
+            raise last_err
 
         content = None
         try:
@@ -442,6 +453,85 @@ def _generate_feedback_with_openai(meta, transcript):
         return {"error": f"フィードバック生成エラー: {e}"}
 
 
+
+def _normalize_feedback_payload(payload):
+    """
+    OpenAIの返り値（JSON/テキスト/エラー）を templates で扱いやすい形に正規化する。
+    - summary: str
+    - good_points / improvements / next_actions: list[str]
+    - score: int
+    """
+    try:
+        if payload is None:
+            payload = {}
+        if isinstance(payload, str):
+            payload = {"text": payload}
+        elif not isinstance(payload, dict):
+            payload = {"text": str(payload)}
+
+        v = dict(payload)
+
+        def _as_str(x):
+            if x is None:
+                return ""
+            try:
+                return str(x)
+            except Exception:
+                return ""
+
+        def _as_list(x):
+            if x is None:
+                return []
+            if isinstance(x, list):
+                out = []
+                for it in x:
+                    s = _as_str(it).strip()
+                    if s:
+                        out.append(s)
+                return out
+            s = _as_str(x).strip()
+            return [s] if s else []
+
+        if not isinstance(v.get("summary"), str):
+            v["summary"] = _as_str(v.get("summary"))
+
+        if not v.get("summary"):
+            if v.get("error"):
+                v["summary"] = _as_str(v.get("error"))
+            elif v.get("text"):
+                v["summary"] = _as_str(v.get("text"))
+
+        v["good_points"] = _as_list(v.get("good_points"))
+        v["improvements"] = _as_list(v.get("improvements"))
+        v["next_actions"] = _as_list(v.get("next_actions"))
+
+        score = v.get("score")
+        try:
+            v["score"] = int(score)
+        except Exception:
+            v["score"] = 0
+
+        if "summary" not in v:
+            v["summary"] = ""
+        if "good_points" not in v:
+            v["good_points"] = []
+        if "improvements" not in v:
+            v["improvements"] = []
+        if "next_actions" not in v:
+            v["next_actions"] = []
+        if "score" not in v:
+            v["score"] = 0
+
+        return v
+    except Exception:
+        return {
+            "summary": "（フィードバックの整形に失敗しました）",
+            "good_points": [],
+            "improvements": [],
+            "next_actions": [],
+            "score": 0
+        }
+
 @app.post("/api/session/<session_id>/feedback/generate")
 @require_auth
 def api_generate_feedback(session_id):
@@ -455,6 +545,7 @@ def api_generate_feedback(session_id):
         return jsonify({"ok": False, "error": "transcript is empty"}), 400
 
     feedback_payload = _generate_feedback_with_openai(meta, transcript)
+    feedback_payload = _normalize_feedback_payload(feedback_payload)
     ok = store.save_feedback(session_id, feedback_payload)
 
     return jsonify({"ok": ok, "feedback": feedback_payload}), (200 if ok else 404)
