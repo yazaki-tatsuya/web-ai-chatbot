@@ -128,3 +128,186 @@ class InMemorySessionStore:
     def get_feedback(self, session_id: str) -> Any:
         with self._lock:
             return self._feedback.get(session_id)
+
+
+class SQLiteSessionStore:
+    """
+    SQLite に永続化するストア。
+    InMemorySessionStore と同じ I/F を維持し、最小差分で差し替えできるようにする。
+    """
+    def __init__(self, db_path: str = "app.db", scenarios: Optional[List[Dict[str, Any]]] = None):
+        import sqlite3
+        self._scenarios = scenarios or DEFAULT_SCENARIOS
+        self._db_path = db_path
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA foreign_keys=ON;")
+        self._init_db()
+
+    def _init_db(self) -> None:
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    scenario_id TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    instructions TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS transcripts (
+                    session_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    session_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);")
+            self._conn.commit()
+
+    # ---- scenario ----
+    def list_modes(self) -> List[str]:
+        return sorted({s["mode"] for s in self._scenarios})
+
+    def list_scenarios(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not mode:
+            return list(self._scenarios)
+        return [s for s in self._scenarios if s["mode"] == mode]
+
+    def find_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
+        for s in self._scenarios:
+            if s["id"] == scenario_id:
+                return s
+        return None
+
+    # ---- session ----
+    def create_session(self, scenario_id: str = "free_talk", instructions_override: Optional[str] = None) -> SessionMeta:
+        s = self.find_scenario(scenario_id) or self.find_scenario("free_talk")
+        assert s is not None
+
+        sid = f"sess_{uuid4().hex}"
+        instr = (instructions_override or s["default_instructions"]).strip()
+        meta = SessionMeta(
+            session_id=sid,
+            scenario_id=s["id"],
+            mode=s["mode"],
+            title=s["title"],
+            instructions=instr,
+            created_at=int(time.time())
+        )
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO sessions(session_id, scenario_id, mode, title, instructions, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (meta.session_id, meta.scenario_id, meta.mode, meta.title, meta.instructions, meta.created_at)
+            )
+            self._conn.commit()
+        return meta
+
+    def get_session(self, session_id: str) -> Optional[SessionMeta]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT session_id, scenario_id, mode, title, instructions, created_at FROM sessions WHERE session_id=?",
+                (session_id,)
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return SessionMeta(
+            session_id=row[0],
+            scenario_id=row[1],
+            mode=row[2],
+            title=row[3],
+            instructions=row[4],
+            created_at=int(row[5]),
+        )
+
+    def list_sessions(self, limit: int = 50) -> List[SessionMeta]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT session_id, scenario_id, mode, title, instructions, created_at FROM sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            )
+            rows = cur.fetchall()
+        return [
+            SessionMeta(
+                session_id=r[0],
+                scenario_id=r[1],
+                mode=r[2],
+                title=r[3],
+                instructions=r[4],
+                created_at=int(r[5]),
+            )
+            for r in rows
+        ]
+
+    # ---- logs ----
+    def save_transcript(self, session_id: str, payload: Dict[str, Any]) -> bool:
+        import json
+        with self._lock:
+            cur = self._conn.execute("SELECT 1 FROM sessions WHERE session_id=?", (session_id,))
+            if not cur.fetchone():
+                return False
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            self._conn.execute(
+                "INSERT INTO transcripts(session_id, payload_json) VALUES (?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET payload_json=excluded.payload_json",
+                (session_id, payload_json)
+            )
+            self._conn.commit()
+        return True
+
+    def get_transcript(self, session_id: str) -> Optional[Dict[str, Any]]:
+        import json
+        with self._lock:
+            cur = self._conn.execute("SELECT payload_json FROM transcripts WHERE session_id=?", (session_id,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return None
+
+    # ---- feedback ----
+    def save_feedback(self, session_id: str, payload: Any) -> bool:
+        import json
+        with self._lock:
+            cur = self._conn.execute("SELECT 1 FROM sessions WHERE session_id=?", (session_id,))
+            if not cur.fetchone():
+                return False
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            self._conn.execute(
+                "INSERT INTO feedback(session_id, payload_json) VALUES (?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET payload_json=excluded.payload_json",
+                (session_id, payload_json)
+            )
+            self._conn.commit()
+        return True
+
+    def get_feedback(self, session_id: str) -> Any:
+        import json
+        with self._lock:
+            cur = self._conn.execute("SELECT payload_json FROM feedback WHERE session_id=?", (session_id,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return None
