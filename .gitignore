@@ -6,13 +6,16 @@ ok_Azure_*
 test_Azure_*.py
 interview.html
 style.css
-index_bkup*.html
+*bkup*.html
 *.png
-RP*
-参考
 *進捗*
 *.md
 *old*
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

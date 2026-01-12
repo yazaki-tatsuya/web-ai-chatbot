@@ -17,8 +17,8 @@ import queue
 from functools import wraps
 
 # 追加
-from session_store import InMemorySessionStore
-store = InMemorySessionStore()
+from session_store import SQLiteSessionStore
+store = SQLiteSessionStore(os.environ.get("SQLITE_PATH") or "app.db")
 
 # Flaskアプリケーションの設定
 app = Flask(__name__)
