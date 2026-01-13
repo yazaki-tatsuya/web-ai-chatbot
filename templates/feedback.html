@@ -12,7 +12,7 @@
     <div class="card-body">
       <h5 class="card-title">まとめ（仮）</h5>
       {% if feedback %}
-        {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.next_actions or feedback.score is not none %}
+        {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.better_questions or feedback.model_answer or feedback.alt_phrasings or feedback.next_actions or feedback.next_drill or feedback.score is not none %}
           {% if feedback.summary %}
             <div class="mb-3">
               <div class="fw-semibold">要約</div>
@@ -49,7 +49,44 @@
             </div>
           {% endif %}
 
-          {% if feedback.next_actions %}
+          
+          {% if feedback.better_questions %}
+            <div class="mb-3">
+              <div class="fw-semibold">次に確認すべき質問</div>
+              <ul class="mb-0">
+                {% for x in feedback.better_questions %}
+                  <li>{{ x }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if feedback.model_answer %}
+            <div class="mb-3">
+              <div class="fw-semibold">模範解答例</div>
+              <div style="white-space: pre-wrap;">{{ feedback.model_answer }}</div>
+            </div>
+          {% endif %}
+
+          {% if feedback.alt_phrasings %}
+            <div class="mb-3">
+              <div class="fw-semibold">言い換え例</div>
+              <ul class="mb-0">
+                {% for x in feedback.alt_phrasings %}
+                  <li>{{ x }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if feedback.next_drill %}
+            <div class="mb-3">
+              <div class="fw-semibold">次の1本ノック</div>
+              <div>{{ feedback.next_drill }}</div>
+            </div>
+          {% endif %}
+
+{% if feedback.next_actions %}
             <div class="mb-0">
               <div class="fw-semibold">次のアクション</div>
               <ul class="mb-0">
@@ -154,3 +191,4 @@
 </script>
 
 </body></html>
+

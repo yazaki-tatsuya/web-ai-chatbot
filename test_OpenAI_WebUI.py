@@ -1,3 +1,4 @@
+
 # eventlet.monkey_patch() は最初に呼び出す必要があります
 import eventlet
 eventlet.monkey_patch()
@@ -448,10 +449,14 @@ def _generate_feedback_with_openai(meta, transcript):
             f"追加指示: {instructions}\n\n"
             "以下の会話ログを読んで、次のJSON形式で返してください。\n"
             "{\n"
-            "  \"summary\": \"会話の要約（2〜4行）\",\n"
-            "  \"good_points\": [\"良かった点1\", \"良かった点2\"],\n"
-            "  \"improvements\": [\"改善点1（具体行動）\", \"改善点2（具体行動）\"],\n"
-            "  \"next_actions\": [\"次回の練習でやること1\", \"やること2\"],\n"
+            "  \"summary\": \"会話の要約（2〜4行。状況/論点/結論が分かるように）\",\n"
+            "  \"good_points\": [\"良かった点（最大3）\"],\n"
+            "  \"improvements\": [\"改善点（最大3。次回すぐ実行できる行動で）\"],\n"
+            "  \"better_questions\": [\"次に確認すべき質問（最大3）\"],\n"
+            "  \"model_answer\": \"模範解答例（結論→理由→次アクション。6〜10行程度）\",\n"
+            "  \"alt_phrasings\": [\"言い換え例（柔らかめ）\", \"言い換え例（端的/強め）\"],\n"
+            "  \"next_actions\": [\"次回の練習でやること（最大3）\"],\n"
+            "  \"next_drill\": \"次の1本ノック（次回の練習テーマを1つ。短く）\",\n"
             "  \"score\": 0\n"
             "}\n\n"
             "会話ログ:\n"
@@ -558,6 +563,16 @@ def _normalize_feedback_payload(payload):
         v["improvements"] = _as_list(v.get("improvements"))
         v["next_actions"] = _as_list(v.get("next_actions"))
 
+        v["better_questions"] = _as_list(v.get("better_questions"))
+        if not isinstance(v.get("model_answer"), str):
+            v["model_answer"] = _as_str(v.get("model_answer"))
+        ap = v.get("alt_phrasings")
+        if isinstance(ap, dict):
+            ap = [ap.get("soft") or ap.get("soften") or "", ap.get("direct") or ap.get("strong") or ""]
+        v["alt_phrasings"] = _as_list(ap)
+        if not isinstance(v.get("next_drill"), str):
+            v["next_drill"] = _as_str(v.get("next_drill"))
+
         score = v.get("score")
         try:
             v["score"] = int(score)
@@ -572,6 +587,14 @@ def _normalize_feedback_payload(payload):
             v["improvements"] = []
         if "next_actions" not in v:
             v["next_actions"] = []
+        if "better_questions" not in v:
+            v["better_questions"] = []
+        if "model_answer" not in v:
+            v["model_answer"] = ""
+        if "alt_phrasings" not in v:
+            v["alt_phrasings"] = []
+        if "next_drill" not in v:
+            v["next_drill"] = ""
         if "score" not in v:
             v["score"] = 0
 
