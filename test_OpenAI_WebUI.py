@@ -274,8 +274,37 @@ def session_start():
 
 @app.route("/history")
 def history():
+    # UI改善（溜まり過ぎ対策）：/history をページング表示
+    # - 既存の store.list_sessions() はそのまま利用し、ここでスライスする
+    # - クエリ: ?page=1&page_size=10
+    try:
+        page = int(request.args.get("page", "1") or "1")
+    except Exception:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", "10") or "10")
+    except Exception:
+        page_size = 10
+
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 10
+    if page_size > 200:
+        page_size = 200
+
+    all_sessions = list(store.list_sessions())
+    total = len(all_sessions)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_sessions = all_sessions[start:end]
+
     sessions_view = []
-    for s in store.list_sessions():
+    for s in page_sessions:
         # s が dict / object どちらでも落ちないように
         sid = ""
         title = ""
@@ -312,7 +341,16 @@ def history():
             "mode": mode,
         })
 
-    return render_template("history.html", sessions=sessions_view)
+    return render_template(
+        "history.html",
+        sessions=sessions_view,
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=total_pages,
+        has_prev=(page > 1),
+        has_next=(page < total_pages),
+    )
 
 # ▼▼▼ STG-002: 生成済フィードバック一覧 ▼▼▼
 @app.route("/feedbacks")
