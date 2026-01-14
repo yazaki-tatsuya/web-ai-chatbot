@@ -1,4 +1,3 @@
-
 # eventlet.monkey_patch() は最初に呼び出す必要があります
 import eventlet
 eventlet.monkey_patch()
@@ -447,17 +446,22 @@ def _generate_feedback_with_openai(meta, transcript):
         user = (
             f"シナリオ: {title}\n"
             f"追加指示: {instructions}\n\n"
-            "以下の会話ログを読んで、次のJSON形式で返してください。\n"
+            "以下の会話ログ（全体）を読んで、次のJSON形式で返してください。\n"
+            "※ユーザーの最初の返答だけでなく、会話の流れ全体を対象にしてください。\n"
             "{\n"
             "  \"summary\": \"会話の要約（2〜4行。状況/論点/結論が分かるように）\",\n"
+            "  \"score\": 0,\n"
             "  \"good_points\": [\"良かった点（最大3）\"],\n"
-            "  \"improvements\": [\"改善点（最大3。次回すぐ実行できる行動で）\"],\n"
+            "  \"improvements\": [\"改善点（最大3。次回すぐ実行できる具体行動で）\"],\n"
             "  \"better_questions\": [\"次に確認すべき質問（最大3）\"],\n"
-            "  \"model_answer\": \"模範解答例（結論→理由→次アクション。6〜10行程度）\",\n"
-            "  \"alt_phrasings\": [\"言い換え例（柔らかめ）\", \"言い換え例（端的/強め）\"],\n"
+            "  \"key_moments\": [\n"
+            "    \"【局面】(いつ/何に対して)\\n【狙い】(相手が知りたいこと)\\n【改善】(こう言うと良い)\\n【模範（ユーザー）】(1〜3文)\\n【短い言い換え】(1文)\",\n"
+            "    \"...（2〜5個）\"\n"
+            "  ],\n"
+            "  \"model_answer\": \"模範会話例（2〜4往復。ユーザーと相手の両方を書き、重要局面ではユーザーの返しを示す）\",\n"
+            "  \"alt_phrasings\": [\"言い換え例（柔らかめ）\", \"言い換え例（端的）\"],\n"
             "  \"next_actions\": [\"次回の練習でやること（最大3）\"],\n"
-            "  \"next_drill\": \"次の1本ノック（次回の練習テーマを1つ。短く）\",\n"
-            "  \"score\": 0\n"
+            "  \"next_drill\": \"次の1本ノック（次回の練習テーマを1つ。短く）\"\n"
             "}\n\n"
             "会話ログ:\n"
             f"{convo_text}"
@@ -562,14 +566,12 @@ def _normalize_feedback_payload(payload):
         v["good_points"] = _as_list(v.get("good_points"))
         v["improvements"] = _as_list(v.get("improvements"))
         v["next_actions"] = _as_list(v.get("next_actions"))
-
         v["better_questions"] = _as_list(v.get("better_questions"))
+        v["key_moments"] = _as_list(v.get("key_moments"))
+
         if not isinstance(v.get("model_answer"), str):
             v["model_answer"] = _as_str(v.get("model_answer"))
-        ap = v.get("alt_phrasings")
-        if isinstance(ap, dict):
-            ap = [ap.get("soft") or ap.get("soften") or "", ap.get("direct") or ap.get("strong") or ""]
-        v["alt_phrasings"] = _as_list(ap)
+        v["alt_phrasings"] = _as_list(v.get("alt_phrasings"))
         if not isinstance(v.get("next_drill"), str):
             v["next_drill"] = _as_str(v.get("next_drill"))
 
@@ -579,6 +581,17 @@ def _normalize_feedback_payload(payload):
         except Exception:
             v["score"] = 0
 
+        if "better_questions" not in v:
+            v["better_questions"] = []
+        if "key_moments" not in v:
+            v["key_moments"] = []
+        if "model_answer" not in v:
+            v["model_answer"] = ""
+        if "alt_phrasings" not in v:
+            v["alt_phrasings"] = []
+        if "next_drill" not in v:
+            v["next_drill"] = ""
+
         if "summary" not in v:
             v["summary"] = ""
         if "good_points" not in v:
@@ -587,14 +600,6 @@ def _normalize_feedback_payload(payload):
             v["improvements"] = []
         if "next_actions" not in v:
             v["next_actions"] = []
-        if "better_questions" not in v:
-            v["better_questions"] = []
-        if "model_answer" not in v:
-            v["model_answer"] = ""
-        if "alt_phrasings" not in v:
-            v["alt_phrasings"] = []
-        if "next_drill" not in v:
-            v["next_drill"] = ""
         if "score" not in v:
             v["score"] = 0
 
