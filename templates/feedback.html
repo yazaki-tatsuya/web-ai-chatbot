@@ -12,7 +12,7 @@
     <div class="card-body">
       <h5 class="card-title">まとめ（仮）</h5>
       {% if feedback %}
-        {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.better_questions or feedback.model_answer or feedback.alt_phrasings or feedback.next_actions or feedback.next_drill or feedback.score is not none %}
+        {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.better_questions or feedback.key_moments or feedback.model_answer or feedback.alt_phrasings or feedback.next_actions or feedback.next_drill or feedback.score is not none %}
           {% if feedback.summary %}
             <div class="mb-3">
               <div class="fw-semibold">要約</div>
@@ -47,9 +47,7 @@
                 {% endfor %}
               </ul>
             </div>
-          {% endif %}
 
-          
           {% if feedback.better_questions %}
             <div class="mb-3">
               <div class="fw-semibold">次に確認すべき質問</div>
@@ -61,9 +59,20 @@
             </div>
           {% endif %}
 
+          {% if feedback.key_moments %}
+            <div class="mb-3">
+              <div class="fw-semibold">重要局面レビュー</div>
+              <ul class="mb-0">
+                {% for x in feedback.key_moments %}
+                  <li><div style="white-space: pre-wrap;">{{ x }}</div></li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
           {% if feedback.model_answer %}
             <div class="mb-3">
-              <div class="fw-semibold">模範解答例</div>
+              <div class="fw-semibold">模範会話例</div>
               <div style="white-space: pre-wrap;">{{ feedback.model_answer }}</div>
             </div>
           {% endif %}
@@ -85,8 +94,9 @@
               <div>{{ feedback.next_drill }}</div>
             </div>
           {% endif %}
+          {% endif %}
 
-{% if feedback.next_actions %}
+          {% if feedback.next_actions %}
             <div class="mb-0">
               <div class="fw-semibold">次のアクション</div>
               <ul class="mb-0">
@@ -191,4 +201,3 @@
 </script>
 
 </body></html>
-
