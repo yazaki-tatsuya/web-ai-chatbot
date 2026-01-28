@@ -258,12 +258,34 @@ def home():
 def modes():
     return render_template("modes.html", modes=[_make_mode_view(m) for m in store.list_modes()])
 
+@app.route("/shelves")
+def shelves():
+    mode = request.args.get("mode")
+    if not mode:
+        mode = "basic"
+    shelves = store.list_shelves(mode) if hasattr(store, "list_shelves") else []
+    if len(shelves) <= 1:
+        if shelves and shelves[0].get("shelf_id") and shelves[0].get("shelf_id") != "UNSPECIFIED":
+            return redirect(f"/scenarios?mode={mode}&shelf_id={shelves[0].get('shelf_id')}")
+        return redirect(f"/scenarios?mode={mode}")
+    return render_template("shelves.html", shelves=shelves, mode=mode)
+
 @app.route("/scenarios")
 def scenarios():
     mode = request.args.get("mode")
     if not mode:
         mode = "basic"
-    return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode)], mode=mode)
+    shelf_id = request.args.get("shelf_id")
+    shelf_title = None
+    if shelf_id and hasattr(store, "list_shelves"):
+        try:
+            for sh in store.list_shelves(mode):
+                if sh.get("shelf_id") == shelf_id:
+                    shelf_title = sh.get("shelf_title")
+                    break
+        except Exception:
+            shelf_title = None
+    return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode, shelf_id=shelf_id)], mode=mode, shelf_id=shelf_id, shelf_title=shelf_title)
 
 @app.post("/session/start")
 def session_start():
