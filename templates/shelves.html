@@ -1,0 +1,24 @@
+<!doctype html><html lang="ja"><head>
+  <meta charset="utf-8" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>棚</title>
+</head><body class="bg-light">
+<div class="container py-4">
+  <a href="/modes" class="text-decoration-none">← モードへ戻る</a>
+  <h3 class="mt-2">棚選択{% if mode %}（{{mode}}）{% endif %}</h3>
+
+  <div class="row g-3 mt-1">
+    {% for sh in shelves %}
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-body">
+            <h5 class="card-title">{{ sh.shelf_title }}</h5>
+            <p class="text-muted small mb-2">シナリオ数：{{ sh.count }}</p>
+            <a class="btn btn-primary" href="/scenarios?mode={{ mode }}&shelf_id={{ sh.shelf_id }}">この棚へ</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+</body></html>

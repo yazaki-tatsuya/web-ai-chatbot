@@ -94,10 +94,28 @@ class InMemorySessionStore:
     def list_modes(self) -> List[str]:
         return sorted({s["mode"] for s in self._scenarios})
 
-    def list_scenarios(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_shelves(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         if not mode:
-            return list(self._scenarios)
-        return [s for s in self._scenarios if s["mode"] == mode]
+            arr = list(self._scenarios)
+        else:
+            arr = [s for s in self._scenarios if s["mode"] == mode]
+        mp: Dict[str, Dict[str, Any]] = {}
+        for s in arr:
+            sid = s.get("shelf_id") or "UNSPECIFIED"
+            title = s.get("shelf_title") or s.get("shelf") or sid
+            if sid not in mp:
+                mp[sid] = {"shelf_id": sid, "shelf_title": title, "count": 0}
+            mp[sid]["count"] += 1
+        return [mp[k] for k in sorted(mp.keys())]
+
+    def list_scenarios(self, mode: Optional[str] = None, shelf_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not mode:
+            arr = list(self._scenarios)
+        else:
+            arr = [s for s in self._scenarios if s["mode"] == mode]
+        if shelf_id:
+            arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
+        return arr
 
     def find_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
         for s in self._scenarios:
@@ -243,10 +261,28 @@ class SQLiteSessionStore:
     def list_modes(self) -> List[str]:
         return sorted({s["mode"] for s in self._scenarios})
 
-    def list_scenarios(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_shelves(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         if not mode:
-            return list(self._scenarios)
-        return [s for s in self._scenarios if s["mode"] == mode]
+            arr = list(self._scenarios)
+        else:
+            arr = [s for s in self._scenarios if s["mode"] == mode]
+        mp: Dict[str, Dict[str, Any]] = {}
+        for s in arr:
+            sid = s.get("shelf_id") or "UNSPECIFIED"
+            title = s.get("shelf_title") or s.get("shelf") or sid
+            if sid not in mp:
+                mp[sid] = {"shelf_id": sid, "shelf_title": title, "count": 0}
+            mp[sid]["count"] += 1
+        return [mp[k] for k in sorted(mp.keys())]
+
+    def list_scenarios(self, mode: Optional[str] = None, shelf_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not mode:
+            arr = list(self._scenarios)
+        else:
+            arr = [s for s in self._scenarios if s["mode"] == mode]
+        if shelf_id:
+            arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
+        return arr
 
     def find_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
         for s in self._scenarios:
