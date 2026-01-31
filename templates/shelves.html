@@ -6,14 +6,35 @@
 <div class="container py-4">
   <a href="/modes" class="text-decoration-none">← モードへ戻る</a>
   <h3 class="mt-2">棚選択{% if mode %}（{{mode}}）{% endif %}</h3>
+  <div class="text-muted small">棚は「何を鍛える訓練か」で分類しています。</div>
 
   <div class="row g-3 mt-1">
     {% for sh in shelves %}
       <div class="col-md-4">
         <div class="card">
           <div class="card-body">
-            <h5 class="card-title">{{ sh.shelf_title }}</h5>
+            {% set shelf_title = sh.shelf_title if sh.shelf_title else 'UNSPECIFIED' %}
+            {% if shelf_title == '上司・役員報告' %}
+              {% set shelf_desc = '結論→根拠→次アクションで、上位者の意思決定を引き出す' %}
+            {% elif shelf_title == '他部署調整・交渉' %}
+              {% set shelf_desc = '利害調整・交渉・合意形成（落とし所の作り方）を鍛える' %}
+            {% elif shelf_title == 'マネジメント' %}
+              {% set shelf_desc = '部下育成・目標設定・評価・依頼/任せ方などのマネジメントを鍛える' %}
+            {% elif shelf_title == '顧客対応' %}
+              {% set shelf_desc = '顧客の不安/不満に向き合い、期待値調整と信頼回復を進める' %}
+            {% elif shelf_title == 'コミュニケーション専門ノック' %}
+              {% set shelf_desc = '状況把握→論点整理→的確回答を反射神経で回す“総合ドリル”' %}
+            {% else %}
+              {% set shelf_desc = '分類調整中（とりあえず試せる置き場）' %}
+            {% endif %}
+            {% if shelf_title == 'UNSPECIFIED' %}
+              {% set display_title = 'その他（未分類）' %}
+            {% else %}
+              {% set display_title = shelf_title %}
+            {% endif %}
+            <h5 class="card-title">{{ display_title }}</h5>
             <p class="text-muted small mb-2">シナリオ数：{{ sh.count }}</p>
+            <div class="text-muted small mb-2">{{ shelf_desc }}</div>
             <a class="btn btn-primary" href="/scenarios?mode={{ mode }}&shelf_id={{ sh.shelf_id }}">この棚へ</a>
           </div>
         </div>
