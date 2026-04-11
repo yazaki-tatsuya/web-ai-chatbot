@@ -14,7 +14,15 @@
         <div class="card">
           <div class="card-body">
             {% set shelf_title = sh.shelf_title if sh.shelf_title else 'UNSPECIFIED' %}
-            {% if shelf_title == '上司・役員報告' %}
+            {% if shelf_title.startswith('レベル1') %}
+              {% set shelf_desc = '発話（秒〜1分）：結論先出し／詰問返しなど“ショット練習”' %}
+            {% elif shelf_title.startswith('レベル2') %}
+              {% set shelf_desc = '局面（5〜15分）：論点整理／判断／期待値調整など“ラリー練習”' %}
+            {% elif shelf_title.startswith('レベル3') %}
+              {% set shelf_desc = '会議（30〜60分）：目的→論点→決定→宿題まで“会議運営”' %}
+            {% elif shelf_title.startswith('レベル4') %}
+              {% set shelf_desc = 'プロジェクト全体（週〜月）：コミュ設計→重要会話→更新で“推進設計”' %}
+            {% elif shelf_title == '上司・役員報告' %}
               {% set shelf_desc = '結論→根拠→次アクションで、上位者の意思決定を引き出す' %}
             {% elif shelf_title == '他部署調整・交渉' %}
               {% set shelf_desc = '利害調整・交渉・合意形成（落とし所の作り方）を鍛える' %}
