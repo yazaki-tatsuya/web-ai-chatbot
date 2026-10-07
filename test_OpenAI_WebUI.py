@@ -90,8 +90,10 @@ def logout():
     return redirect(url_for("home"))
 
 # OpenAI用の環境変数取得
-key = os.environ.get("OPEN_AI_KEY")
-url = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
+key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
+REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
+REALTIME_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
+url = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 
 # ============================================================
 # LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
@@ -707,7 +709,7 @@ def on_message(ws, message, sid):
                 print(f"AIの応答（audio）: {transcript}")
             # audio ではAI応答をemitしない
 
-        elif msg_type == "response.audio_transcript.delta":
+        elif msg_type in ("response.output_audio_transcript.delta", "response.audio_transcript.delta"):
             delta = message_data.get("delta") or ""
             state["ai_transcription_buffer"] += delta
             print(f"AIの応答（audio_transcript.delta）: {delta}")
@@ -715,13 +717,6 @@ def on_message(ws, message, sid):
             if delta.strip():
                 socketio.emit('ai_message', {'message': state["ai_transcription_buffer"], 'turn': state["current_turn"], 'stream': True}, room=sid)
                 socketio.emit('status_message', {'message': 'AI応答(部分)ストリーミング送信'}, room=sid)
-
-        elif msg_type == "response.audio_transcript.done":
-            # emitは下の162行目側でのみ行う（ここではバッファクリアのみ）
-            transcript = state["ai_transcription_buffer"]
-            state["ai_transcription_buffer"] = ""
-            print(f"AIの応答（audio_transcript.done）: {transcript}")
-            # emitしない
 
         elif msg_type == "user.transcription":
             transcription = message_data.get("transcription")
@@ -749,7 +744,7 @@ def on_message(ws, message, sid):
                 response_create = {
                     "type": "response.create",
                     "response": {
-                        "modalities": ["text","audio"],
+                        "output_modalities": ["audio"],
                         "instructions": instructions
                     }
                 }
@@ -763,7 +758,7 @@ def on_message(ws, message, sid):
             print(message_data)
             # user_message emit を削除
 
-        elif msg_type == "response.audio.delta":
+        elif msg_type in ("response.output_audio.delta", "response.audio.delta"):
             delta = message_data.get("delta")
             if delta:
                 try:
@@ -775,7 +770,7 @@ def on_message(ws, message, sid):
                 except Exception as e:
                     print("audio delta decode error:", e)
 
-        elif msg_type == "response.audio_transcript.done":
+        elif msg_type in ("response.output_audio_transcript.done", "response.audio_transcript.done"):
             final_ai_text = state["ai_transcription_buffer"]
             state["ai_transcription_buffer"] = ""
             print("メッセージ受信：response.audio_transcript.done")
@@ -789,7 +784,7 @@ def on_message(ws, message, sid):
                 socketio.emit('ai_message', {'message': '（無応答）', 'turn': state["current_turn"]}, room=sid)
                 print("final_ai_textが空のためダミーai_messageをemitしました")
 
-        elif msg_type == "response.audio.done":
+        elif msg_type in ("response.output_audio.done", "response.audio.done"):
             # バッファにたまったPCMをWAV化してemit
             pcm_bytes = state["audio_pcm_buffer"]
             if pcm_bytes:
@@ -843,17 +838,24 @@ def on_open(ws, sid):
     session_update = {
         "type": "session.update",
         "session": {
-            "modalities": ["text","audio"],
-            "input_audio_format": "pcm16",
+            "type": "realtime",
+            "output_modalities": ["audio"],
             "instructions": "ユーザーを支援します。一回の応答は短く簡潔に。",
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms":2000  # 長めに設定して1発話を統合
-            },
-            "input_audio_transcription": {
-                "model": "whisper-1"
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 2000
+                    },
+                    "transcription": {"model": "whisper-1", "language": "ja"}
+                },
+                "output": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "voice": REALTIME_VOICE
+                }
             },
         }
     }
@@ -861,16 +863,6 @@ def on_open(ws, sid):
     print("セッションアップデートメッセージを送信しました。")
     socketio.emit('status_message', {'message': "セッションアップデートメッセージを送信しました。"}, room=sid)
     # response.create は「start_interview」イベント受信時のみ送信するように変更
-    # response_create = {
-    #     "type": "response.create",
-    #     "response": {
-    #         "modalities": ["text","audio"],
-    #         "instructions": "ユーザーを支援します"
-    #     }
-    # }
-    # ws.send(json.dumps(response_create))
-    # print("response.create メッセージを送信しました。")
-    # socketio.emit('status_message', {'message': "response.create メッセージを送信しました。"}, room=sid)
     # --- 追加: 起動時に自動発話しない旨を明示 ---
     print("AI初手発話は on_open では行いません（ユーザー操作または発話後に開始）。")
     socketio.emit('status_message', {'message': "AI初手発話は on_open では行いません。"}, room=sid)
@@ -884,7 +876,6 @@ def start_websocket(sid):
     headers = [
         "Content-Type: application/json",
         f"Authorization: Bearer {key}" ,
-        "OpenAI-Beta: realtime=v1",
     ]
     with state["ws_lock"]:
         if state["ws_connection"] is not None:
@@ -924,47 +915,45 @@ def handle_disconnect():
     cleanup_client_state(sid)
 
 # ============================================================
-# ✅ JWTトークン発行エンドポイントの追加
-# ============================================================
-import time
-import jwt
-from flask import jsonify
-
-JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "local-dev-secret")
-JWT_EXP_SECONDS = 300  # トークン有効期限5分
-
-@app.route("/jwt", methods=["GET"])
-@require_auth
-def issue_jwt_token():
-    """Realtime API に直接接続するための一時JWTを発行"""
-    payload = {
-        "aud": "openai-realtime",
-        "iat": int(time.time()),
-        "exp": int(time.time()) + JWT_EXP_SECONDS,
-        "iss": "flask-server",
-    }
-    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-    return jsonify({"jwt": token})
-
-
-# ============================================================
-# ✅ SDP Proxyエンドポイント（CORS回避用）
+# ✅ Realtime WebRTC セッション作成（Unified interface）
 # ============================================================
 @app.route("/realtime/sdp-proxy", methods=["POST"])
 @require_auth
 def realtime_sdp_proxy():
-    """ブラウザのSDP Offerを安全に中継してCORSを回避"""
+    """SDP とセッション設定を OpenAI に中継し、API キーをブラウザへ露出させない。"""
     try:
         import requests
-        sdp_offer = request.data.decode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {os.environ.get('OPEN_AI_KEY')}",
-            "Content-Type": "application/sdp",
-            "OpenAI-Beta": "realtime=v1"
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
+        if not api_key:
+            return jsonify({"error": "OPENAI_API_KEY (or OPEN_AI_KEY) is not configured"}), 500
+
+        sdp_offer = request.get_data(as_text=True)
+        if not sdp_offer.strip():
+            return jsonify({"error": "SDP offer is empty"}), 400
+
+        session_config = {
+            "type": "realtime",
+            "model": REALTIME_MODEL,
+            "output_modalities": ["audio"],
+            "audio": {
+                "output": {"voice": REALTIME_VOICE}
+            }
         }
-        url = "https://api.openai.com/v1/realtime?model=gpt-realtime"
-        res = requests.post(url, headers=headers, data=sdp_offer)
-        return res.text, res.status_code, {"Content-Type": "application/sdp"}
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+        }
+        files = {
+            "sdp": (None, sdp_offer, "application/sdp"),
+            "session": (None, json.dumps(session_config), "application/json"),
+        }
+        res = requests.post(
+            "https://api.openai.com/v1/realtime/calls",
+            headers=headers,
+            files=files,
+            timeout=30,
+        )
+        content_type = "application/sdp" if res.ok else (res.headers.get("Content-Type") or "text/plain")
+        return res.text, res.status_code, {"Content-Type": content_type}
     except Exception as e:
         print("SDP Proxy error:", e)
         return str(e), 500
@@ -1054,7 +1043,7 @@ def handle_start_process():
         response_create = {
             "type": "response.create",
             "response": {
-                "modalities": ["text", "audio"],
+                "output_modalities": ["audio"],
                 "instructions": (
                     "あなたは丁寧で穏やかなインタビュアーです。"
                     "初回の発話では「よろしくお願いします。」の後に一言だけ自然な導入（例：「今日はよろしくお願いします。」や「では始めていきましょうか。」）を添えてください。"
