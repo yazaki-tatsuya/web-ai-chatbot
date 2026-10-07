@@ -100,9 +100,24 @@ class InMemorySessionStore:
         else:
             arr = [s for s in self._scenarios if s["mode"] == mode]
         mp: Dict[str, Dict[str, Any]] = {}
+        # レベル棚（L1〜L4）：シナリオに level がある場合はこちらを入口にする
+        level_titles = {
+            1: "レベル1：発話（秒〜1分）",
+            2: "レベル2：局面（5〜15分）",
+            3: "レベル3：会議（30〜60分）",
+            4: "レベル4：プロジェクト全体（週〜月）",
+        }
+        for lv in (1, 2, 3, 4):
+            sid = f"LEVEL-{lv}"
+            mp[sid] = {"shelf_id": sid, "shelf_title": level_titles.get(lv, sid), "count": 0}
         for s in arr:
-            sid = s.get("shelf_id") or "UNSPECIFIED"
-            title = s.get("shelf_title") or s.get("shelf") or sid
+            lv = s.get("level")
+            if isinstance(lv, int) and 1 <= lv <= 4:
+                sid = f"LEVEL-{lv}"
+                title = level_titles.get(lv, sid)
+            else:
+                sid = s.get("shelf_id") or "UNSPECIFIED"
+                title = s.get("shelf_title") or s.get("shelf") or sid
             if sid not in mp:
                 mp[sid] = {"shelf_id": sid, "shelf_title": title, "count": 0}
             mp[sid]["count"] += 1
@@ -114,7 +129,15 @@ class InMemorySessionStore:
         else:
             arr = [s for s in self._scenarios if s["mode"] == mode]
         if shelf_id:
-            arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
+            if shelf_id.startswith("LEVEL-"):
+                try:
+                    lv = int(shelf_id.split("-", 1)[1])
+                except Exception:
+                    lv = None
+                if isinstance(lv, int):
+                    arr = [s for s in arr if s.get("level") == lv]
+            else:
+                arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
         return arr
 
     def find_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
@@ -267,9 +290,24 @@ class SQLiteSessionStore:
         else:
             arr = [s for s in self._scenarios if s["mode"] == mode]
         mp: Dict[str, Dict[str, Any]] = {}
+        # レベル棚（L1〜L4）：シナリオに level がある場合はこちらを入口にする
+        level_titles = {
+            1: "レベル1：発話（秒〜1分）",
+            2: "レベル2：局面（5〜15分）",
+            3: "レベル3：会議（30〜60分）",
+            4: "レベル4：プロジェクト全体（週〜月）",
+        }
+        for lv in (1, 2, 3, 4):
+            sid = f"LEVEL-{lv}"
+            mp[sid] = {"shelf_id": sid, "shelf_title": level_titles.get(lv, sid), "count": 0}
         for s in arr:
-            sid = s.get("shelf_id") or "UNSPECIFIED"
-            title = s.get("shelf_title") or s.get("shelf") or sid
+            lv = s.get("level")
+            if isinstance(lv, int) and 1 <= lv <= 4:
+                sid = f"LEVEL-{lv}"
+                title = level_titles.get(lv, sid)
+            else:
+                sid = s.get("shelf_id") or "UNSPECIFIED"
+                title = s.get("shelf_title") or s.get("shelf") or sid
             if sid not in mp:
                 mp[sid] = {"shelf_id": sid, "shelf_title": title, "count": 0}
             mp[sid]["count"] += 1
@@ -281,7 +319,15 @@ class SQLiteSessionStore:
         else:
             arr = [s for s in self._scenarios if s["mode"] == mode]
         if shelf_id:
-            arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
+            if shelf_id.startswith("LEVEL-"):
+                try:
+                    lv = int(shelf_id.split("-", 1)[1])
+                except Exception:
+                    lv = None
+                if isinstance(lv, int):
+                    arr = [s for s in arr if s.get("level") == lv]
+            else:
+                arr = [s for s in arr if (s.get("shelf_id") or "UNSPECIFIED") == shelf_id]
         return arr
 
     def find_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
