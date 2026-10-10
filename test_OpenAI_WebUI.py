@@ -3,6 +3,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
+import warnings
 from dotenv import load_dotenv
 load_dotenv()  # .env を読み込む（ローカル用）
 
@@ -23,12 +24,25 @@ store = SQLiteSessionStore(os.environ.get("SQLITE_PATH") or "app.db")
 # Flaskアプリケーションの設定
 app = Flask(__name__)
 
+def _load_flask_secret_key():
+    secret_key = os.environ.get("FLASK_SECRET_KEY")
+    if secret_key:
+        return secret_key
+
+    warnings.warn(
+        "FLASK_SECRET_KEY is not configured; using an insecure development fallback. "+
+        "Set FLASK_SECRET_KEY in production.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return "local-dev-secret-change-me"
+
 try:
     app.json.ensure_ascii = False   # Flask 2.2+ 系
 except Exception:
     app.config['JSON_AS_ASCII'] = False  # 旧Flask互換
     
-app.config['SECRET_KEY'] = 'secret!'
+app.config['SECRET_KEY'] = _load_flask_secret_key()
 app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')

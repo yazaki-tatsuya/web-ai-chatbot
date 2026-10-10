@@ -46,6 +46,17 @@ class RealtimeApiTestCase(unittest.TestCase):
             "audio": {"output": {"voice": webui.REALTIME_VOICE}},
         })
 
+    def test_flask_secret_key_comes_from_environment(self):
+        with patch.dict(os.environ, {"FLASK_SECRET_KEY": "configured-secret"}):
+            self.assertEqual(webui._load_flask_secret_key(), "configured-secret")
+
+    def test_flask_secret_key_warns_when_not_configured(self):
+        env = {k: v for k, v in os.environ.items() if k != "FLASK_SECRET_KEY"}
+        with patch.dict(os.environ, env, clear=True), self.assertWarns(RuntimeWarning):
+            secret_key = webui._load_flask_secret_key()
+
+        self.assertEqual(secret_key, "local-dev-secret-change-me")
+
     def test_sdp_proxy_rejects_missing_key(self):
         env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPEN_AI_KEY")}
         with patch.dict(os.environ, env, clear=True):
