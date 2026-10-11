@@ -21,6 +21,36 @@ steps:
       ls -la
     displayName: 'Check out GitHub repo and list files'
 
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+      addToPath: true
+    displayName: 'Python 3.11 を準備'
+
+  - script: |
+      set -euo pipefail
+      python -m pip install -r requirements.txt
+    workingDirectory: '$(Build.SourcesDirectory)'
+    displayName: '検証用の依存関係をインストール'
+
+  - script: |
+      set -euo pipefail
+      python -m py_compile test_OpenAI_WebUI.py session_store.py test_realtime_api.py
+    workingDirectory: '$(Build.SourcesDirectory)'
+    env:
+      PYTHONPYCACHEPREFIX: '$(Agent.TempDirectory)/python-cache'
+    displayName: 'Python 構文チェック'
+
+  - script: |
+      set -euo pipefail
+      python -m unittest -v test_realtime_api.py
+    workingDirectory: '$(Build.SourcesDirectory)'
+    env:
+      FLASK_SECRET_KEY: 'ci-test-only-not-for-production'
+      SQLITE_PATH: '$(Agent.TempDirectory)/ci-test.db'
+      PYTHONPYCACHEPREFIX: '$(Agent.TempDirectory)/python-cache'
+    displayName: 'ユニットテスト（失敗時はデプロイを停止）'
+
   - task: ArchiveFiles@2
     inputs:
       rootFolderOrFile: '$(Build.SourcesDirectory)'
