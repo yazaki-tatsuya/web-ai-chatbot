@@ -80,6 +80,8 @@
     const chat = document.getElementById('chat');
     const statusArea = document.getElementById('status');
     let pc, dataChannel;
+    const startButton = document.getElementById('start-btn');
+    let realtimeStartState = 'idle'; // idle / starting / connected
     let lastUserFinalEl = null; // 既存変数は残置（下位互換のため）
     let provisionalUserBubble = null;   // speech_started 直後に出す暫定バブル
 
@@ -206,25 +208,51 @@
     }
 
     async function startRealtime(){
-      const offer = await createLocalOffer();
-      appendStatus("SDP作成完了");
+      // disabled 属性だけでなく、直接呼び出された場合も二重開始を防ぐ。
+      if (realtimeStartState !== 'idle') return;
+      realtimeStartState = 'starting';
+      startButton.disabled = true;
+      startButton.textContent = '接続中…';
 
-      // ✅ Flaskサーバーのsdp-proxyを経由してCORSを回避
-      const proxyUrl = "/realtime/sdp-proxy";
-      const r = await fetch(proxyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: offer.sdp
-      });
+      try {
+        const offer = await createLocalOffer();
+        appendStatus("SDP作成完了");
 
-      if (!r.ok) {
-        appendStatus("SDP proxy fetch失敗: " + r.status);
-        return;
+        // Flaskサーバーのsdp-proxyを経由してCORSを回避
+        const r = await fetch("/realtime/sdp-proxy", {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: offer.sdp
+        });
+
+        if (!r.ok) {
+          throw new Error("SDP proxy fetch失敗: " + r.status);
+        }
+
+        const answerSDP = await r.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
+        realtimeStartState = 'connected';
+        startButton.textContent = '接続済み';
+        appendStatus("Realtime接続完了 (via Flask proxy)");
+      } catch (error) {
+        appendStatus("Realtime開始失敗: " + error.message);
+        // 失敗した試行のマイク・接続を残さず、安全に再試行できるようにする。
+        clearResponseTimer();
+        responseInFlight = false;
+        if (pc) {
+          pc.getSenders().forEach(sender => {
+            if (sender.track) sender.track.stop();
+          });
+          pc.onconnectionstatechange = null;
+        }
+        if (dataChannel) dataChannel.close();
+        if (pc) pc.close();
+        dataChannel = null;
+        pc = null;
+        realtimeStartState = 'idle';
+        startButton.disabled = false;
+        startButton.textContent = 'Realtime開始';
       }
-
-      const answerSDP = await r.text();
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
-      appendStatus("Realtime接続完了 (via Flask proxy)");
     }
 
     async function createLocalOffer(){
