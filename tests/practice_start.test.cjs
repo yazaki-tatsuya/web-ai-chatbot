@@ -13,12 +13,19 @@ function createHarness() {
   const button = { disabled: false, textContent: 'Realtime開始', addEventListener() {} };
   const elements = {
     'start-btn': button,
-    'end-btn': { addEventListener() {} },
+    'end-btn': { disabled: false, textContent: '終了→保存', addEventListener() {} },
     chat: {},
     status: { appendChild() {} },
   };
   const peers = [];
   const tracks = [];
+  const audioElements = [];
+  const timers = new Map();
+  const saves = [];
+  const location = { href: '' };
+  let nextTimer = 1;
+  let saveFailure = null;
+  let resolveSave;
   let mediaCalls = 0;
   let fetchCalls = 0;
   let failure = null;
@@ -46,12 +53,27 @@ function createHarness() {
     console,
     Map,
     Date,
-    setTimeout,
-    clearTimeout,
+    setTimeout(callback) {
+      const id = nextTimer++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
+    location,
     RTCPeerConnection: PeerConnection,
     document: {
       getElementById(id) { return elements[id]; },
-      createElement() { return {}; },
+      createElement(tag) {
+        if (tag !== 'audio') return {};
+        const audio = {
+          paused: false, removed: false,
+          pause() { this.paused = true; },
+          remove() { this.removed = true; },
+        };
+        audioElements.push(audio);
+        return audio;
+      },
+      body: { appendChild() {} },
     },
     navigator: {
       mediaDevices: {
@@ -67,7 +89,15 @@ function createHarness() {
         },
       },
     },
-    async fetch() {
+    async fetch(url, options) {
+      if (url.endsWith('/transcript')) {
+        saves.push(JSON.parse(options.body));
+        if (saveFailure === 'pending') {
+          await new Promise(resolve => { resolveSave = resolve; });
+        }
+        if (saveFailure === 'network') throw new Error('Save network failure');
+        return { ok: saveFailure !== 'http', status: 500 };
+      }
       fetchCalls++;
       if (failure === 'network') throw new Error('Network unavailable');
       return { ok: failure !== 'http', status: 500, async text() { return 'answer'; } };
@@ -76,7 +106,19 @@ function createHarness() {
   // Compile and execute the actual template script, not a copy of the start logic.
   vm.runInContext(script, context);
   return {
-    button, peers, tracks,
+    button, peers, tracks, audioElements, saves, location,
+    endButton: elements['end-btn'],
+    setSaveFailure(value) { saveFailure = value; },
+    releaseSave() { resolveSave(); },
+    end() { return vm.runInContext('endAndSave()', context); },
+    scheduleResponse() { vm.runInContext('scheduleResponseCreate()', context); },
+    get timerCount() { return timers.size; },
+    get resourcesReleased() {
+      return vm.runInContext(
+        'pc === null && dataChannel === null && localStream === null && !responseInFlight',
+        context
+      );
+    },
     setFailure(value) { failure = value; },
     releaseMedia() { resolveMedia(); },
     start() { return vm.runInContext('startRealtime()', context); },
@@ -127,3 +169,79 @@ for (const failure of ['microphone', 'network', 'http', 'answer']) {
     assert.equal(h.peers[1].closed, false);
   });
 }
+
+test('releases microphone, audio and timer before save completes; prevents duplicate save', async () => {
+  const h = createHarness();
+  await h.start();
+  h.peers[0].ontrack({ streams: [{}] });
+  h.scheduleResponse();
+  assert.equal(h.timerCount, 1);
+  h.setSaveFailure('pending');
+  const saving = h.end();
+  assert.ok(h.resourcesReleased);
+  assert.ok(h.tracks.every(track => track.stopped));
+  assert.equal(h.peers[0].closed, true);
+  assert.equal(h.peers[0].channel.closed, true);
+  assert.equal(h.peers[0].ontrack, null);
+  assert.equal(h.peers[0].channel.onmessage, null);
+  assert.equal(h.audioElements[0].paused, true);
+  assert.equal(h.audioElements[0].srcObject, null);
+  assert.equal(h.audioElements[0].removed, true);
+  assert.equal(h.timerCount, 0);
+  assert.equal(h.endButton.disabled, true);
+  await h.end();
+  await h.start();
+  h.scheduleResponse();
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.peers.length, 1);
+  assert.equal(h.timerCount, 0);
+  h.releaseSave();
+  await saving;
+  assert.ok(h.location.href.startsWith('/feedback/'));
+});
+
+for (const failure of ['http', 'network']) {
+  test(`permits saving again without restarting audio after ${failure} save failure`, async () => {
+    const h = createHarness();
+    await h.start();
+    h.setSaveFailure(failure);
+    await h.end();
+    assert.ok(h.resourcesReleased);
+    assert.ok(h.tracks.every(track => track.stopped));
+    assert.equal(h.button.textContent, '終了済み');
+    assert.equal(h.button.disabled, true);
+    assert.equal(h.endButton.disabled, false);
+    assert.equal(h.endButton.textContent, '保存を再試行');
+    assert.equal(h.location.href, '');
+    h.setSaveFailure(null);
+    await h.end();
+    assert.equal(h.saves.length, 2);
+    assert.deepEqual(h.saves[0].transcript, h.saves[1].transcript);
+    assert.equal(h.peers.length, 1);
+    assert.ok(h.location.href.startsWith('/feedback/'));
+  });
+}
+
+test('stops a microphone acquired after ending during the permission prompt', async () => {
+  const h = createHarness();
+  h.setFailure('pending');
+  const starting = h.start();
+  await h.end();
+  h.releaseMedia();
+  await starting;
+  assert.ok(h.resourcesReleased);
+  assert.ok(h.tracks.every(track => track.stopped));
+  assert.equal(h.fetchCalls, 0);
+  assert.equal(h.button.textContent, '終了済み');
+  assert.equal(h.button.disabled, true);
+});
+
+test('can end and save before any connection is started', async () => {
+  const h = createHarness();
+  await h.end();
+  assert.ok(h.resourcesReleased);
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.peers.length, 0);
+  await h.start();
+  assert.equal(h.peers.length, 0);
+});
