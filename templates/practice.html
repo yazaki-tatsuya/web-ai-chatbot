@@ -79,9 +79,14 @@
   <script>
     const chat = document.getElementById('chat');
     const statusArea = document.getElementById('status');
-    let pc, dataChannel;
+    let pc = null, dataChannel = null;
     const startButton = document.getElementById('start-btn');
-    let realtimeStartState = 'idle'; // idle / starting / connected
+    const endButton = document.getElementById('end-btn');
+    let realtimeStartState = 'idle'; // idle / starting / connected / ended
+    let localStream = null;
+    const remoteAudioElements = [];
+    let sessionEnded = false;
+    let saveInProgress = false;
     let lastUserFinalEl = null; // 既存変数は残置（下位互換のため）
     let provisionalUserBubble = null;   // speech_started 直後に出す暫定バブル
 
@@ -103,7 +108,41 @@
       }
     }
 
+    function releaseRealtimeResources(){
+      clearResponseTimer();
+      responseInFlight = false;
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      if (pc) {
+        pc.ontrack = null;
+        pc.ondatachannel = null;
+        pc.onconnectionstatechange = null;
+        pc.getSenders().forEach(sender => {
+          if (sender.track) sender.track.stop();
+        });
+      }
+      if (dataChannel) {
+        dataChannel.onopen = null;
+        dataChannel.onmessage = null;
+        dataChannel.close();
+        dataChannel = null;
+      }
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      remoteAudioElements.forEach(audio => {
+        audio.pause();
+        audio.srcObject = null;
+        audio.remove();
+      });
+      remoteAudioElements.length = 0;
+    }
+
     function scheduleResponseCreate(){
+      if (sessionEnded) return;
       clearResponseTimer();
       responseCreateTimer = setTimeout(() => {
         try {
@@ -216,6 +255,7 @@
 
       try {
         const offer = await createLocalOffer();
+        if (sessionEnded) return;
         appendStatus("SDP作成完了");
 
         // Flaskサーバーのsdp-proxyを経由してCORSを回避
@@ -225,30 +265,23 @@
           body: offer.sdp
         });
 
+        if (sessionEnded) return;
         if (!r.ok) {
           throw new Error("SDP proxy fetch失敗: " + r.status);
         }
 
         const answerSDP = await r.text();
+        if (sessionEnded) return;
         await pc.setRemoteDescription({ type: "answer", sdp: answerSDP });
+        if (sessionEnded) return;
         realtimeStartState = 'connected';
         startButton.textContent = '接続済み';
         appendStatus("Realtime接続完了 (via Flask proxy)");
       } catch (error) {
+        if (sessionEnded) return;
         appendStatus("Realtime開始失敗: " + error.message);
         // 失敗した試行のマイク・接続を残さず、安全に再試行できるようにする。
-        clearResponseTimer();
-        responseInFlight = false;
-        if (pc) {
-          pc.getSenders().forEach(sender => {
-            if (sender.track) sender.track.stop();
-          });
-          pc.onconnectionstatechange = null;
-        }
-        if (dataChannel) dataChannel.close();
-        if (pc) pc.close();
-        dataChannel = null;
-        pc = null;
+        releaseRealtimeResources();
         realtimeStartState = 'idle';
         startButton.disabled = false;
         startButton.textContent = 'Realtime開始';
@@ -549,6 +582,12 @@
         }
       };
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 許可ダイアログ待ちの間に終了した場合、後から取得したマイクも停止する。
+      if (sessionEnded) {
+        stream.getTracks().forEach(track => track.stop());
+        return null;
+      }
+      localStream = stream;
       stream.getTracks().forEach((track)=>pc.addTrack(track, stream));
 
       // ✅ リモート音声を再生する MediaStreamTrack を処理
@@ -557,6 +596,7 @@
         const audioEl = document.createElement("audio");
         audioEl.srcObject = remoteStream;
         audioEl.autoplay = true;
+        remoteAudioElements.push(audioEl);
         document.body.appendChild(audioEl);
         appendStatus("🎧 リモート音声ストリーム受信中...");
       };
@@ -573,21 +613,38 @@
       };
 
       const offer = await pc.createOffer();
+      if (sessionEnded) return null;
       await pc.setLocalDescription(offer);
+      if (sessionEnded) return null;
       return offer;
     }
 
     async function endAndSave(){
-      const payload = { ended_at: Date.now(), transcript: transcriptLog };
-      const res = await fetch(`/api/session/${SESSION_ID}/transcript`, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
-      if(res.ok){
+      if (saveInProgress) return;
+      saveInProgress = true;
+      sessionEnded = true;
+      realtimeStartState = 'ended';
+      startButton.disabled = true;
+      startButton.textContent = '終了済み';
+      endButton.disabled = true;
+      endButton.textContent = '保存中…';
+      // 保存通信や画面遷移を待たず、先にマイク・再生音声・接続を停止する。
+      releaseRealtimeResources();
+
+      try {
+        const payload = { ended_at: Date.now(), transcript: transcriptLog };
+        const res = await fetch(`/api/session/${SESSION_ID}/transcript`, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         location.href = `/feedback/${SESSION_ID}`;
-      } else {
-        appendStatus("保存失敗: " + res.status);
+      } catch (error) {
+        appendStatus("保存失敗: " + error.message + "（再度保存できます）");
+        saveInProgress = false;
+        endButton.disabled = false;
+        endButton.textContent = '保存を再試行';
       }
     }
 
