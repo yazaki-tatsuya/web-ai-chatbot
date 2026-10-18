@@ -47,6 +47,7 @@
                 {% endfor %}
               </ul>
             </div>
+          {% endif %}
 
           {% if feedback.better_questions %}
             <div class="mb-3">
@@ -93,7 +94,6 @@
               <div class="fw-semibold">次の1本ノック</div>
               <div>{{ feedback.next_drill }}</div>
             </div>
-          {% endif %}
           {% endif %}
 
           {% if feedback.next_actions %}
