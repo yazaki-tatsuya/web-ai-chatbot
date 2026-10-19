@@ -10,7 +10,7 @@
 
   <div class="card mt-3">
     <div class="card-body">
-      <h5 class="card-title">まとめ（仮）</h5>
+      <h5 class="card-title">フィードバック結果</h5>
       {% if feedback %}
         {% if feedback.summary or feedback.good_points or feedback.improvements or feedback.better_questions or feedback.key_moments or feedback.model_answer or feedback.alt_phrasings or feedback.next_actions or feedback.next_drill or feedback.score is not none %}
           {% if feedback.summary %}
@@ -110,7 +110,11 @@
           <pre class="mb-0">{{ feedback | pprint }}</pre>
         {% endif %}
       {% else %}
-        <div class="text-muted">まだフィードバックは生成されていません（次ステップでOpenAI評価に置き換えます）。</div>
+        {% if transcript and transcript.transcript %}
+          <div class="text-muted">まだフィードバックは生成されていません。下の「フィードバック生成」ボタンから生成できます。</div>
+        {% else %}
+          <div class="text-muted">フィードバックを生成するには、先に練習を終了して会話ログを保存してください。</div>
+        {% endif %}
       {% endif %}
     </div>
   </div>

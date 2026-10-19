@@ -90,14 +90,32 @@ class FeedbackDisplayTestCase(unittest.TestCase):
         "next_drill": "次の1本ノック",
     }
 
-    def render_feedback(self, feedback):
+    def render_feedback(self, feedback, transcript=None):
         with webui.app.test_request_context():
             return webui.render_template(
                 "feedback.html",
                 session={"id": "test-session", "scenario_title": "テスト"},
-                transcript=None,
+                transcript=transcript,
                 feedback=feedback,
             )
+
+    def test_current_feedback_heading_is_displayed(self):
+        html = self.render_feedback({"summary": "要約", "score": None})
+        self.assertIn("フィードバック結果", html)
+        self.assertNotIn("まとめ（仮）", html)
+
+    def test_empty_feedback_guides_user_to_generate_when_log_exists(self):
+        html = self.render_feedback(
+            None,
+            transcript={"transcript": [{"role": "user", "text": "こんにちは"}]},
+        )
+        self.assertIn("「フィードバック生成」ボタンから生成できます", html)
+        self.assertNotIn("次ステップでOpenAI評価に置き換えます", html)
+
+    def test_empty_feedback_guides_user_to_save_when_log_is_missing(self):
+        html = self.render_feedback(None)
+        self.assertIn("先に練習を終了して会話ログを保存してください", html)
+        self.assertNotIn("次ステップでOpenAI評価に置き換えます", html)
 
     def test_sections_display_independently_without_improvements(self):
         for improvements in ([], None):
