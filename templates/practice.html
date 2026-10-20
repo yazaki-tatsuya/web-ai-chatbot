@@ -62,7 +62,7 @@
         <div class="text-muted small">session: {{ session.id }}</div>
       </div>
       <div class="d-flex gap-2">
-        <button id="toggle-devlog" class="btn btn-outline-secondary btn-sm">開発ログ</button>
+        <button id="toggle-devlog" type="button" class="btn btn-outline-secondary btn-sm" aria-controls="status" aria-expanded="false">開発ログを表示</button>
         <a class="btn btn-outline-secondary btn-sm" href="/home">Home</a>
         <button id="end-btn" class="btn btn-danger btn-sm">終了→保存</button>
       </div>
@@ -75,10 +75,17 @@
     <button id="start-btn" class="btn btn-primary">Realtime開始</button>
   </div>
   <div id="chat"></div>
-  <div id="status"></div>
+  <div id="status" hidden></div>
   <script>
     const chat = document.getElementById('chat');
     const statusArea = document.getElementById('status');
+    const devlogButton = document.getElementById('toggle-devlog');
+    devlogButton.addEventListener('click', () => {
+      statusArea.hidden = !statusArea.hidden;
+      devlogButton.setAttribute('aria-expanded', String(!statusArea.hidden));
+      devlogButton.textContent = statusArea.hidden ? '開発ログを表示' : '開発ログを隠す';
+      if (!statusArea.hidden) statusArea.scrollTop = statusArea.scrollHeight;
+    });
     let pc = null, dataChannel = null;
     const startButton = document.getElementById('start-btn');
     const endButton = document.getElementById('end-btn');
