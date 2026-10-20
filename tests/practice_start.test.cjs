@@ -11,11 +11,24 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 function createHarness() {
   const button = { disabled: false, textContent: 'Realtime開始', addEventListener() {} };
+  const devlogMarkup = html.match(/<button\b[^>]*id="toggle-devlog"[^>]*>([^<]*)<\/button>/)[0];
+  const devlogButton = {
+    textContent: devlogMarkup.match(/>([^<]*)<\/button>/)[1],
+    attributes: { 'aria-expanded': devlogMarkup.match(/aria-expanded="([^"]*)"/)[1] },
+    addEventListener(type, handler) { this[type] = handler; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const status = {
+    hidden: /<div\b[^>]*id="status"[^>]*\bhidden\b/.test(html),
+    children: [], scrollTop: 0, scrollHeight: 100,
+    appendChild(child) { this.children.push(child); },
+  };
   const elements = {
     'start-btn': button,
+    'toggle-devlog': devlogButton,
     'end-btn': { disabled: false, textContent: '終了→保存', addEventListener() {} },
     chat: {},
-    status: { appendChild() {} },
+    status,
   };
   const peers = [];
   const tracks = [];
@@ -106,7 +119,11 @@ function createHarness() {
   // Compile and execute the actual template script, not a copy of the start logic.
   vm.runInContext(script, context);
   return {
-    button, peers, tracks, audioElements, saves, location,
+    button, peers, tracks, audioElements, saves, location, devlogButton, status,
+    appendStatus(text) {
+      context.statusMessage = text;
+      return vm.runInContext('appendStatus(statusMessage)', context);
+    },
     endButton: elements['end-btn'],
     setSaveFailure(value) { saveFailure = value; },
     releaseSave() { resolveSave(); },
@@ -126,6 +143,40 @@ function createHarness() {
     get fetchCalls() { return fetchCalls; },
   };
 }
+
+test('development log starts hidden with matching button state', () => {
+  const h = createHarness();
+  assert.equal(h.status.hidden, true);
+  assert.equal(h.devlogButton.attributes['aria-expanded'], 'false');
+  assert.equal(h.devlogButton.textContent, '開発ログを表示');
+  assert.match(html, /aria-controls="status"/);
+});
+
+test('development log button toggles visibility, label and expanded state', () => {
+  const h = createHarness();
+  h.devlogButton.click();
+  assert.equal(h.status.hidden, false);
+  assert.equal(h.devlogButton.attributes['aria-expanded'], 'true');
+  assert.equal(h.devlogButton.textContent, '開発ログを隠す');
+  assert.equal(h.status.scrollTop, h.status.scrollHeight);
+  h.devlogButton.click();
+  assert.equal(h.status.hidden, true);
+  assert.equal(h.devlogButton.attributes['aria-expanded'], 'false');
+  assert.equal(h.devlogButton.textContent, '開発ログを表示');
+});
+
+test('development log retains messages recorded while hidden', async () => {
+  const h = createHarness();
+  await h.appendStatus('非表示中のログ');
+  assert.equal(h.status.hidden, true);
+  h.devlogButton.click();
+  assert.equal(h.status.children[0].textContent, '> 非表示中のログ');
+  h.devlogButton.click();
+  await h.appendStatus('追加ログ');
+  h.devlogButton.click();
+  assert.equal(h.status.children.length, 2);
+  assert.equal(h.status.children[1].textContent, '> 追加ログ');
+});
 
 test('suppresses repeated starts while microphone permission is pending', async () => {
   const h = createHarness();

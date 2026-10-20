@@ -81,5 +81,87 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class FeedbackDisplayTestCase(unittest.TestCase):
+    SECTIONS = {
+        "better_questions": "次に確認すべき質問",
+        "key_moments": "重要局面レビュー",
+        "model_answer": "模範会話例",
+        "alt_phrasings": "言い換え例",
+        "next_drill": "次の1本ノック",
+    }
+
+    def render_feedback(self, feedback, transcript=None):
+        with webui.app.test_request_context():
+            return webui.render_template(
+                "feedback.html",
+                session={"id": "test-session", "scenario_title": "テスト"},
+                transcript=transcript,
+                feedback=feedback,
+            )
+
+    def test_current_feedback_heading_is_displayed(self):
+        html = self.render_feedback({"summary": "要約", "score": None})
+        self.assertIn("フィードバック結果", html)
+        self.assertNotIn("まとめ（仮）", html)
+
+    def test_empty_feedback_guides_user_to_generate_when_log_exists(self):
+        html = self.render_feedback(
+            None,
+            transcript={"transcript": [{"role": "user", "text": "こんにちは"}]},
+        )
+        self.assertIn("「フィードバック生成」ボタンから生成できます", html)
+        self.assertNotIn("次ステップでOpenAI評価に置き換えます", html)
+
+    def test_empty_feedback_guides_user_to_save_when_log_is_missing(self):
+        html = self.render_feedback(None)
+        self.assertIn("先に練習を終了して会話ログを保存してください", html)
+        self.assertNotIn("次ステップでOpenAI評価に置き換えます", html)
+
+    def test_sections_display_independently_without_improvements(self):
+        for improvements in ([], None):
+            for field, heading in self.SECTIONS.items():
+                with self.subTest(improvements=improvements, field=field):
+                    feedback = {"score": None}
+                    if improvements is not None:
+                        feedback["improvements"] = improvements
+                    text = "この項目のテスト内容"
+                    feedback[field] = text if field in (
+                        "model_answer", "next_drill"
+                    ) else [text]
+                    html = self.render_feedback(feedback)
+                    self.assertIn(heading, html)
+                    self.assertIn(text, html)
+                    self.assertNotIn('class="fw-semibold">改善点', html)
+                    for other_field, other_heading in self.SECTIONS.items():
+                        if other_field != field:
+                            self.assertNotIn(other_heading, html)
+
+    def test_improvements_and_other_sections_display_together(self):
+        feedback = {
+            "score": None,
+            "improvements": ["結論から話す"],
+            "better_questions": ["期限はいつですか"],
+            "model_answer": "結論から説明します",
+        }
+        html = self.render_feedback(feedback)
+        for text in (
+            "改善点", "結論から話す", "次に確認すべき質問",
+            "期限はいつですか", "模範会話例", "結論から説明します",
+        ):
+            self.assertIn(text, html)
+
+    def test_empty_sections_are_not_displayed(self):
+        feedback = {"score": None, "summary": "要約のみ", "improvements": []}
+        feedback.update({
+            field: "" if field in ("model_answer", "next_drill") else []
+            for field in self.SECTIONS
+        })
+        html = self.render_feedback(feedback)
+        self.assertIn("要約のみ", html)
+        for heading in self.SECTIONS.values():
+            self.assertNotIn(heading, html)
+        self.assertNotIn('class="fw-semibold">改善点', html)
+
+
 if __name__ == "__main__":
     unittest.main()
