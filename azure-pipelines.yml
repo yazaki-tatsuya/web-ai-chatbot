@@ -51,6 +51,17 @@ steps:
       PYTHONPYCACHEPREFIX: '$(Agent.TempDirectory)/python-cache'
     displayName: 'ユニットテスト（失敗時はデプロイを停止）'
 
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '24.x'
+    displayName: 'Node.js 24 を準備'
+
+  - script: |
+      set -euo pipefail
+      node --test tests/*.test.cjs
+    workingDirectory: '$(Build.SourcesDirectory)'
+    displayName: 'JavaScript ユニットテスト（失敗時はデプロイを停止）'
+
   - task: ArchiveFiles@2
     inputs:
       rootFolderOrFile: '$(Build.SourcesDirectory)'
