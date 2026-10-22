@@ -73,12 +73,14 @@
    <textarea id="prompt" class="form-control mb-2" rows="3" placeholder="ここにシナリオ/設定（システムプロンプト）を入力してください。">{{ instructions }}</textarea>
     <!-- ▲▲ 追加(1/2) ここまで ▲▲ -->
     <button id="start-btn" class="btn btn-primary">Realtime開始</button>
+    <div id="operation-status" class="alert alert-info mt-2" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   </div>
   <div id="chat"></div>
   <div id="status" hidden></div>
   <script>
     const chat = document.getElementById('chat');
     const statusArea = document.getElementById('status');
+    const operationStatus = document.getElementById('operation-status');
     const devlogButton = document.getElementById('toggle-devlog');
     devlogButton.addEventListener('click', () => {
       statusArea.hidden = !statusArea.hidden;
@@ -212,6 +214,12 @@
     }
     // ▲▲ 追記ここまで ▲▲
 
+    function showOperationStatus(message, isError = false){
+      operationStatus.textContent = message;
+      operationStatus.className = 'alert mt-2 ' + (isError ? 'alert-danger' : 'alert-info');
+      operationStatus.hidden = false;
+    }
+
     async function appendStatus(msg){
       const div = document.createElement('div');
       div.textContent = "> " + msg;
@@ -259,6 +267,7 @@
       realtimeStartState = 'starting';
       startButton.disabled = true;
       startButton.textContent = '接続中…';
+      showOperationStatus('接続中です。マイクの使用を求められた場合は許可してください。');
 
       try {
         const offer = await createLocalOffer();
@@ -283,10 +292,12 @@
         if (sessionEnded) return;
         realtimeStartState = 'connected';
         startButton.textContent = '接続済み';
+        showOperationStatus('接続しました。会話を始められます。');
         appendStatus("Realtime接続完了 (via Flask proxy)");
       } catch (error) {
         if (sessionEnded) return;
         appendStatus("Realtime開始失敗: " + error.message);
+        showOperationStatus('接続に失敗しました: ' + error.message + '。マイクの許可や通信環境を確認し、「Realtime開始」から再試行してください。', true);
         // 失敗した試行のマイク・接続を残さず、安全に再試行できるようにする。
         releaseRealtimeResources();
         realtimeStartState = 'idle';
@@ -635,6 +646,7 @@
       startButton.textContent = '終了済み';
       endButton.disabled = true;
       endButton.textContent = '保存中…';
+      showOperationStatus('会話を終了し、会話ログを保存しています。');
       // 保存通信や画面遷移を待たず、先にマイク・再生音声・接続を停止する。
       releaseRealtimeResources();
 
@@ -646,9 +658,11 @@
           body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
+        showOperationStatus('保存しました。フィードバック画面へ移動します。');
         location.href = `/feedback/${SESSION_ID}`;
       } catch (error) {
         appendStatus("保存失敗: " + error.message + "（再度保存できます）");
+        showOperationStatus('保存に失敗しました: ' + error.message + '。通信環境を確認し、この画面を閉じずに「保存を再試行」を押してください。', true);
         saveInProgress = false;
         endButton.disabled = false;
         endButton.textContent = '保存を再試行';

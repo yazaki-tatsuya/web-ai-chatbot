@@ -23,7 +23,14 @@ function createHarness() {
     children: [], scrollTop: 0, scrollHeight: 100,
     appendChild(child) { this.children.push(child); },
   };
+  const operationMarkup = html.match(/<div\b[^>]*id="operation-status"[^>]*>/)[0];
+  const operationStatus = {
+    hidden: /\bhidden\b/.test(operationMarkup),
+    textContent: '',
+    className: operationMarkup.match(/class="([^"]*)"/)[1],
+  };
   const elements = {
+    'operation-status': operationStatus,
     'start-btn': button,
     'toggle-devlog': devlogButton,
     'end-btn': { disabled: false, textContent: '終了→保存', addEventListener() {} },
@@ -119,7 +126,7 @@ function createHarness() {
   // Compile and execute the actual template script, not a copy of the start logic.
   vm.runInContext(script, context);
   return {
-    button, peers, tracks, audioElements, saves, location, devlogButton, status,
+    button, peers, tracks, audioElements, saves, location, devlogButton, status, operationStatus,
     appendStatus(text) {
       context.statusMessage = text;
       return vm.runInContext('appendStatus(statusMessage)', context);
@@ -150,6 +157,12 @@ test('development log starts hidden with matching button state', () => {
   assert.equal(h.devlogButton.attributes['aria-expanded'], 'false');
   assert.equal(h.devlogButton.textContent, '開発ログを表示');
   assert.match(html, /aria-controls="status"/);
+});
+
+test('user-facing status starts hidden and has an accessible live region', () => {
+  const h = createHarness();
+  assert.equal(h.operationStatus.hidden, true);
+  assert.match(html, /id="operation-status"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
 });
 
 test('development log button toggles visibility, label and expanded state', () => {
@@ -184,12 +197,15 @@ test('suppresses repeated starts while microphone permission is pending', async 
   const first = h.start();
   assert.equal(h.button.disabled, true);
   assert.equal(h.button.textContent, '接続中…');
+  assert.equal(h.operationStatus.hidden, false);
+  assert.match(h.operationStatus.textContent, /接続中/);
   await h.start();
   assert.equal(h.peers.length, 1);
   assert.equal(h.mediaCalls, 1);
   h.releaseMedia();
   await first;
   assert.equal(h.fetchCalls, 1);
+  assert.match(h.operationStatus.textContent, /接続しました/);
 });
 
 test('keeps the start button disabled and prevents another connection after success', async () => {
@@ -212,12 +228,19 @@ for (const failure of ['microphone', 'network', 'http', 'answer']) {
     assert.equal(h.peers[0].closed, true);
     assert.equal(h.peers[0].channel.closed, true);
     assert.ok(h.tracks.every(track => track.stopped));
+    assert.equal(h.status.hidden, true);
+    assert.equal(h.operationStatus.hidden, false);
+    assert.match(h.operationStatus.className, /alert-danger/);
+    assert.match(h.operationStatus.textContent, /接続に失敗しました/);
+    assert.match(h.operationStatus.textContent, /再試行/);
     h.setFailure(null);
     await h.start();
     assert.equal(h.peers.length, 2);
     assert.equal(h.button.disabled, true);
     assert.equal(h.button.textContent, '接続済み');
     assert.equal(h.peers[1].closed, false);
+    assert.match(h.operationStatus.textContent, /接続しました/);
+    assert.doesNotMatch(h.operationStatus.className, /alert-danger/);
   });
 }
 
@@ -240,6 +263,8 @@ test('releases microphone, audio and timer before save completes; prevents dupli
   assert.equal(h.audioElements[0].removed, true);
   assert.equal(h.timerCount, 0);
   assert.equal(h.endButton.disabled, true);
+  assert.match(h.operationStatus.textContent, /保存しています/);
+  assert.doesNotMatch(h.operationStatus.className, /alert-danger/);
   await h.end();
   await h.start();
   h.scheduleResponse();
@@ -264,12 +289,19 @@ for (const failure of ['http', 'network']) {
     assert.equal(h.endButton.disabled, false);
     assert.equal(h.endButton.textContent, '保存を再試行');
     assert.equal(h.location.href, '');
+    assert.equal(h.status.hidden, true);
+    assert.equal(h.operationStatus.hidden, false);
+    assert.match(h.operationStatus.className, /alert-danger/);
+    assert.match(h.operationStatus.textContent, /保存に失敗しました/);
+    assert.match(h.operationStatus.textContent, /保存を再試行/);
     h.setSaveFailure(null);
     await h.end();
     assert.equal(h.saves.length, 2);
     assert.deepEqual(h.saves[0].transcript, h.saves[1].transcript);
     assert.equal(h.peers.length, 1);
     assert.ok(h.location.href.startsWith('/feedback/'));
+    assert.match(h.operationStatus.textContent, /保存しました/);
+    assert.doesNotMatch(h.operationStatus.className, /alert-danger/);
   });
 }
 
