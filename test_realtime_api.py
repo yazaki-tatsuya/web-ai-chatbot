@@ -81,6 +81,21 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class HistoryNavigationTestCase(unittest.TestCase):
+    def test_home_link_returns_home_without_creating_session(self):
+        client = webui.app.test_client()
+        with patch.object(webui.store, "list_sessions", return_value=[]), \
+                patch.object(webui.store, "create_session") as create_session:
+            response = client.get("/history")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('href="/home" class="text-decoration-none">← Home',
+                          response.get_data(as_text=True))
+            home = client.get("/home")
+            self.assertEqual(home.status_code, 200)
+            self.assertIn("コミュニケーション練習", home.get_data(as_text=True))
+            create_session.assert_not_called()
+
+
 class FeedbackDisplayTestCase(unittest.TestCase):
     SECTIONS = {
         "better_questions": "次に確認すべき質問",
