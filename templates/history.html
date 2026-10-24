@@ -31,6 +31,11 @@
           </div>
         </div>
       </div>
+    {% else %}
+      <div class="list-group-item">
+        <p class="text-muted mb-2">練習履歴はまだありません。</p>
+        <a class="btn btn-primary" href="{{ url_for('modes') }}">練習を始める</a>
+      </div>
     {% endfor %}
   </div>
 

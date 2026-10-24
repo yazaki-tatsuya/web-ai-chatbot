@@ -96,6 +96,51 @@ class HistoryNavigationTestCase(unittest.TestCase):
             create_session.assert_not_called()
 
 
+class ListEmptyStateTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_empty_history_shows_practice_link(self):
+        with patch.object(webui.store, "list_sessions", return_value=[]):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("練習履歴はまだありません。", html)
+        self.assertIn('href="/modes">練習を始める</a>', html)
+
+    def test_history_with_session_hides_empty_state(self):
+        sessions = [{"id": "test-session", "title": "練習タイトル",
+                     "created_at": 0, "mode": "basic"}]
+        with patch.object(webui.store, "list_sessions", return_value=sessions):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertNotIn("練習履歴はまだありません。", html)
+        self.assertIn("練習タイトル", html)
+        self.assertIn('href="/practice/test-session"', html)
+        self.assertIn('href="/feedback/test-session"', html)
+
+    def test_empty_feedbacks_shows_history_link(self):
+        with patch.object(webui.store, "list_feedback_sessions", return_value=[]):
+            response = self.client.get("/feedbacks")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("生成済みのフィードバックはありません。", html)
+        self.assertIn('href="/history">履歴からフィードバックを生成する</a>', html)
+        self.assertNotIn('data-sid=', html)
+
+    def test_feedbacks_with_item_hides_empty_state(self):
+        items = [("test-session", "練習タイトル", 0, "basic")]
+        with patch.object(webui.store, "list_feedback_sessions", return_value=items):
+            response = self.client.get("/feedbacks")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertNotIn("生成済みのフィードバックはありません。", html)
+        self.assertIn("練習タイトル", html)
+        self.assertIn('href="/feedback/test-session"', html)
+        self.assertIn('data-sid="test-session"', html)
+
+
 class FeedbackDisplayTestCase(unittest.TestCase):
     SECTIONS = {
         "better_questions": "次に確認すべき質問",
