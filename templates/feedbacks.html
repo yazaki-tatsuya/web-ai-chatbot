@@ -73,8 +73,10 @@
 
   document.querySelectorAll('.btn-del').forEach(btn => {
     btn.addEventListener('click', async function(){
+      if (btn.disabled) return;
       const sid = btn.getAttribute('data-sid');
       if (!sid) return;
+      if (!window.confirm('このフィードバックを削除しますか？会話ログは削除されません。')) return;
 
       btn.disabled = true;
       if (statusEl) statusEl.textContent = '削除中...';
