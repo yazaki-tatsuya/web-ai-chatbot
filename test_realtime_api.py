@@ -81,6 +81,71 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class FeedbackGenerationTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.store = webui.SQLiteSessionStore(":memory:")
+        self.addCleanup(self.store._conn.close)
+        store_patch = patch.object(webui, "store", self.store)
+        store_patch.start()
+        self.addCleanup(store_patch.stop)
+        auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        auth_patch.start()
+        self.addCleanup(auth_patch.stop)
+        self.meta = self.store.create_session("free_talk")
+        self.transcript = [{"role": "user", "text": "こんにちは"}]
+        self.store.save_transcript(self.meta.session_id, {"transcript": self.transcript})
+        self.url = f"/api/session/{self.meta.session_id}/feedback/generate"
+
+    def test_generation_failure_does_not_create_feedback(self):
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"error": "生成に失敗しました"}), \
+                patch.object(self.store, "save_feedback", wraps=self.store.save_feedback) as save:
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "生成に失敗しました"})
+        save.assert_not_called()
+        self.assertIsNone(self.store.get_feedback(self.meta.session_id))
+
+    def test_failed_regeneration_preserves_existing_feedback_and_transcript(self):
+        existing = {"summary": "保存済みの結果", "score": 80}
+        self.store.save_feedback(self.meta.session_id, existing)
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"error": "再生成に失敗しました"}), \
+                patch.object(self.store, "save_feedback", wraps=self.store.save_feedback) as save:
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(response.get_json()["ok"])
+        save.assert_not_called()
+        self.assertEqual(self.store.get_feedback(self.meta.session_id), existing)
+        self.assertEqual(self.store.get_transcript(self.meta.session_id),
+                         {"transcript": self.transcript})
+
+    def test_successful_retry_saves_normalized_feedback(self):
+        generated = {"summary": "新しい結果", "score": 90, "good_points": ["簡潔"]}
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          side_effect=[{"error": "一時的な生成失敗"}, generated]):
+            failed = self.client.post(self.url)
+            response = self.client.post(self.url)
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["feedback"], webui._normalize_feedback_payload(generated))
+        self.assertEqual(self.store.get_feedback(self.meta.session_id), payload["feedback"])
+
+    def test_successful_regeneration_replaces_existing_feedback(self):
+        self.store.save_feedback(self.meta.session_id, {"summary": "以前の結果", "score": 80})
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"summary": "更新された結果", "score": 90}):
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        self.assertEqual(self.store.get_feedback(self.meta.session_id),
+                         response.get_json()["feedback"])
+        self.assertEqual(self.store.get_feedback(self.meta.session_id)["summary"], "更新された結果")
+
+
 class HistoryNavigationTestCase(unittest.TestCase):
     def test_home_link_returns_home_without_creating_session(self):
         client = webui.app.test_client()

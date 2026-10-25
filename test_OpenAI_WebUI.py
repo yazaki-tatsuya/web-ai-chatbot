@@ -664,6 +664,8 @@ def api_generate_feedback(session_id):
         return jsonify({"ok": False, "error": "transcript is empty"}), 400
 
     feedback_payload = _generate_feedback_with_openai(meta, transcript)
+    if isinstance(feedback_payload, dict) and feedback_payload.get("error"):
+        return jsonify({"ok": False, "error": feedback_payload["error"]}), 502
     feedback_payload = _normalize_feedback_payload(feedback_payload)
     ok = store.save_feedback(session_id, feedback_payload)
 

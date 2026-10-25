@@ -58,7 +58,7 @@
         const { res, data } = await postJson('/api/session/' + sid + '/feedback/generate');
         if (!res.ok || !data || data.ok !== true) {
           const msg = (data && (data.error || (data.feedback && data.feedback.error))) ? (data.error || data.feedback.error) : ('再生成に失敗しました（HTTP ' + res.status + '）');
-          if (statusEl) statusEl.textContent = msg;
+          if (statusEl) statusEl.textContent = msg + '（再度「再生成」から再試行できます）';
           btn.disabled = false;
           return;
         }
