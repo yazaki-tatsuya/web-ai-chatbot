@@ -7,7 +7,7 @@
 </head>
 <body class="bg-light">
 <div class="container py-4">
-  <a href="/" class="text-decoration-none">← Home</a>
+  <a href="{{ url_for('home') }}" class="text-decoration-none">← Home</a>
 
   <div class="d-flex justify-content-between align-items-center mt-2">
     <h3 class="mb-0">履歴</h3>
@@ -30,6 +30,11 @@
             <a class="btn btn-sm btn-primary" href="/feedback/{{ s.id }}">フィードバック</a>
           </div>
         </div>
+      </div>
+    {% else %}
+      <div class="list-group-item">
+        <p class="text-muted mb-2">練習履歴はまだありません。</p>
+        <a class="btn btn-primary" href="{{ url_for('modes') }}">練習を始める</a>
       </div>
     {% endfor %}
   </div>

@@ -81,6 +81,131 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class FeedbackGenerationTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.store = webui.SQLiteSessionStore(":memory:")
+        self.addCleanup(self.store._conn.close)
+        store_patch = patch.object(webui, "store", self.store)
+        store_patch.start()
+        self.addCleanup(store_patch.stop)
+        auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        auth_patch.start()
+        self.addCleanup(auth_patch.stop)
+        self.meta = self.store.create_session("free_talk")
+        self.transcript = [{"role": "user", "text": "こんにちは"}]
+        self.store.save_transcript(self.meta.session_id, {"transcript": self.transcript})
+        self.url = f"/api/session/{self.meta.session_id}/feedback/generate"
+
+    def test_generation_failure_does_not_create_feedback(self):
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"error": "生成に失敗しました"}), \
+                patch.object(self.store, "save_feedback", wraps=self.store.save_feedback) as save:
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "生成に失敗しました"})
+        save.assert_not_called()
+        self.assertIsNone(self.store.get_feedback(self.meta.session_id))
+
+    def test_failed_regeneration_preserves_existing_feedback_and_transcript(self):
+        existing = {"summary": "保存済みの結果", "score": 80}
+        self.store.save_feedback(self.meta.session_id, existing)
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"error": "再生成に失敗しました"}), \
+                patch.object(self.store, "save_feedback", wraps=self.store.save_feedback) as save:
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(response.get_json()["ok"])
+        save.assert_not_called()
+        self.assertEqual(self.store.get_feedback(self.meta.session_id), existing)
+        self.assertEqual(self.store.get_transcript(self.meta.session_id),
+                         {"transcript": self.transcript})
+
+    def test_successful_retry_saves_normalized_feedback(self):
+        generated = {"summary": "新しい結果", "score": 90, "good_points": ["簡潔"]}
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          side_effect=[{"error": "一時的な生成失敗"}, generated]):
+            failed = self.client.post(self.url)
+            response = self.client.post(self.url)
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["feedback"], webui._normalize_feedback_payload(generated))
+        self.assertEqual(self.store.get_feedback(self.meta.session_id), payload["feedback"])
+
+    def test_successful_regeneration_replaces_existing_feedback(self):
+        self.store.save_feedback(self.meta.session_id, {"summary": "以前の結果", "score": 80})
+        with patch.object(webui, "_generate_feedback_with_openai",
+                          return_value={"summary": "更新された結果", "score": 90}):
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        self.assertEqual(self.store.get_feedback(self.meta.session_id),
+                         response.get_json()["feedback"])
+        self.assertEqual(self.store.get_feedback(self.meta.session_id)["summary"], "更新された結果")
+
+
+class HistoryNavigationTestCase(unittest.TestCase):
+    def test_home_link_returns_home_without_creating_session(self):
+        client = webui.app.test_client()
+        with patch.object(webui.store, "list_sessions", return_value=[]), \
+                patch.object(webui.store, "create_session") as create_session:
+            response = client.get("/history")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('href="/home" class="text-decoration-none">← Home',
+                          response.get_data(as_text=True))
+            home = client.get("/home")
+            self.assertEqual(home.status_code, 200)
+            self.assertIn("コミュニケーション練習", home.get_data(as_text=True))
+            create_session.assert_not_called()
+
+
+class ListEmptyStateTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_empty_history_shows_practice_link(self):
+        with patch.object(webui.store, "list_sessions", return_value=[]):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("練習履歴はまだありません。", html)
+        self.assertIn('href="/modes">練習を始める</a>', html)
+
+    def test_history_with_session_hides_empty_state(self):
+        sessions = [{"id": "test-session", "title": "練習タイトル",
+                     "created_at": 0, "mode": "basic"}]
+        with patch.object(webui.store, "list_sessions", return_value=sessions):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertNotIn("練習履歴はまだありません。", html)
+        self.assertIn("練習タイトル", html)
+        self.assertIn('href="/practice/test-session"', html)
+        self.assertIn('href="/feedback/test-session"', html)
+
+    def test_empty_feedbacks_shows_history_link(self):
+        with patch.object(webui.store, "list_feedback_sessions", return_value=[]):
+            response = self.client.get("/feedbacks")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("生成済みのフィードバックはありません。", html)
+        self.assertIn('href="/history">履歴からフィードバックを生成する</a>', html)
+        self.assertNotIn('data-sid=', html)
+
+    def test_feedbacks_with_item_hides_empty_state(self):
+        items = [("test-session", "練習タイトル", 0, "basic")]
+        with patch.object(webui.store, "list_feedback_sessions", return_value=items):
+            response = self.client.get("/feedbacks")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertNotIn("生成済みのフィードバックはありません。", html)
+        self.assertIn("練習タイトル", html)
+        self.assertIn('href="/feedback/test-session"', html)
+        self.assertIn('data-sid="test-session"', html)
+
+
 class FeedbackDisplayTestCase(unittest.TestCase):
     SECTIONS = {
         "better_questions": "次に確認すべき質問",

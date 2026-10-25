@@ -189,7 +189,7 @@
 
       if (!res.ok || !data || data.ok !== true) {
         const msg = (data && (data.error || (data.feedback && data.feedback.error))) ? (data.error || data.feedback.error) : ('生成に失敗しました（HTTP ' + res.status + '）');
-        statusEl.textContent = msg;
+        statusEl.textContent = msg + '（再度「フィードバック生成」から再試行できます）';
         btn.disabled = false;
         return;
       }

@@ -22,6 +22,11 @@
           </div>
         </div>
       </div>
+    {% else %}
+      <div class="list-group-item">
+        <p class="text-muted mb-2">生成済みのフィードバックはありません。</p>
+        <a class="btn btn-primary" href="{{ url_for('history') }}">履歴からフィードバックを生成する</a>
+      </div>
     {% endfor %}
   </div>
 
@@ -53,7 +58,7 @@
         const { res, data } = await postJson('/api/session/' + sid + '/feedback/generate');
         if (!res.ok || !data || data.ok !== true) {
           const msg = (data && (data.error || (data.feedback && data.feedback.error))) ? (data.error || data.feedback.error) : ('再生成に失敗しました（HTTP ' + res.status + '）');
-          if (statusEl) statusEl.textContent = msg;
+          if (statusEl) statusEl.textContent = msg + '（再度「再生成」から再試行できます）';
           btn.disabled = false;
           return;
         }
@@ -68,8 +73,10 @@
 
   document.querySelectorAll('.btn-del').forEach(btn => {
     btn.addEventListener('click', async function(){
+      if (btn.disabled) return;
       const sid = btn.getAttribute('data-sid');
       if (!sid) return;
+      if (!window.confirm('このフィードバックを削除しますか？会話ログは削除されません。')) return;
 
       btn.disabled = true;
       if (statusEl) statusEl.textContent = '削除中...';
