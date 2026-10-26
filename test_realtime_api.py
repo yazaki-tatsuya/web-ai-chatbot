@@ -161,6 +161,24 @@ class HistoryNavigationTestCase(unittest.TestCase):
             create_session.assert_not_called()
 
 
+class ModeNavigationTestCase(unittest.TestCase):
+    def test_home_link_returns_home_without_creating_session(self):
+        client = webui.app.test_client()
+        with patch.object(webui.store, "list_modes", return_value=["basic"]), \
+                patch.object(webui.store, "list_scenarios", return_value=[]), \
+                patch.object(webui.store, "create_session") as create_session:
+            response = client.get("/modes")
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertIn('href="/home" class="text-decoration-none">← Home', html)
+            self.assertNotIn('href="/" class="text-decoration-none">← Home', html)
+            self.assertIn('href="/shelves?mode=basic"', html)
+            home = client.get("/home")
+            self.assertEqual(home.status_code, 200)
+            self.assertIn("コミュニケーション練習", home.get_data(as_text=True))
+            create_session.assert_not_called()
+
+
 class ListEmptyStateTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
