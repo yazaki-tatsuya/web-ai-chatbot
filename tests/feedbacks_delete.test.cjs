@@ -9,12 +9,23 @@ const html = fs.readFileSync(
 );
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-function createHarness({ approved = true, failure = null, sid = 'test-session' } = {}) {
-  const status = { textContent: '' };
-  const button = {
+function createButton(sid) {
+  return {
     disabled: false,
     getAttribute(name) { return name === 'data-sid' ? sid : null; },
     addEventListener(type, handler) { this[type] = handler; },
+  };
+}
+
+function createHarness({ approved = true, failure = null, sid = 'test-session' } = {}) {
+  const status = { textContent: '' };
+  const regenButton = createButton(sid);
+  const button = createButton(sid);
+  const otherRegenButton = createButton('other-session');
+  const otherDeleteButton = createButton('other-session');
+  const actionGroups = {
+    [sid]: [regenButton, button],
+    'other-session': [otherRegenButton, otherDeleteButton],
   };
   const confirmations = [];
   const requests = [];
@@ -23,7 +34,16 @@ function createHarness({ approved = true, failure = null, sid = 'test-session' }
   const context = vm.createContext({
     document: {
       getElementById() { return status; },
-      querySelectorAll(selector) { return selector === '.btn-del' ? [button] : []; },
+      querySelectorAll(selector) {
+        if (selector === '.btn-regen') return [regenButton, otherRegenButton];
+        if (selector === '.btn-del') return [button, otherDeleteButton];
+        return [];
+      },
+      querySelector(selector) {
+        const match = selector.match(/\.feedback-actions\[data-sid="([^"]+)"\]/);
+        const buttons = match && actionGroups[match[1]];
+        return buttons ? { querySelectorAll() { return buttons; } } : null;
+      },
     },
     window: {
       confirm(message) {
@@ -48,7 +68,8 @@ function createHarness({ approved = true, failure = null, sid = 'test-session' }
   // Execute the actual template script so the tests cover production event handlers.
   vm.runInContext(script, context);
   return {
-    button, status, confirmations, requests,
+    button, regenButton, otherRegenButton, otherDeleteButton,
+    status, confirmations, requests,
     get reloads() { return reloads; },
     setFailure(value) { failure = value; },
     releaseRequest() { releaseRequest(); },
@@ -75,6 +96,9 @@ test('approved deletion posts to the delete endpoint and reloads after success',
   assert.equal(h.requests[0].url, '/api/session/test-session/feedback/delete');
   assert.equal(h.requests[0].options.method, 'POST');
   assert.equal(h.button.disabled, true);
+  assert.equal(h.regenButton.disabled, true);
+  assert.equal(h.otherRegenButton.disabled, false);
+  assert.equal(h.otherDeleteButton.disabled, false);
   assert.match(h.status.textContent, /削除完了/);
   assert.equal(h.reloads, 1);
 });
@@ -83,6 +107,7 @@ test('repeated clicks during deletion do not prompt or send another request', as
   const h = createHarness({ failure: 'pending' });
   const deleting = h.button.click();
   assert.equal(h.button.disabled, true);
+  assert.equal(h.regenButton.disabled, true);
   assert.match(h.status.textContent, /削除中/);
   await h.button.click();
   assert.equal(h.confirmations.length, 1);
@@ -97,6 +122,7 @@ for (const failure of ['http', 'network', 'api']) {
     const h = createHarness({ failure });
     await h.button.click();
     assert.equal(h.button.disabled, false);
+    assert.equal(h.regenButton.disabled, false);
     assert.match(h.status.textContent, /削除に失敗|通信エラー/);
     assert.equal(h.reloads, 0);
     h.setFailure(null);

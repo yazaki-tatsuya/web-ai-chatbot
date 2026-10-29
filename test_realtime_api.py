@@ -208,9 +208,10 @@ class ListEmptyStateTestCase(unittest.TestCase):
             response = self.client.get("/feedbacks")
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
+        body_before_script = html.split("<script>", 1)[0]
         self.assertIn("生成済みのフィードバックはありません。", html)
         self.assertIn('href="/history">履歴からフィードバックを生成する</a>', html)
-        self.assertNotIn('data-sid=', html)
+        self.assertNotIn('data-sid=', body_before_script)
 
     def test_feedbacks_with_item_hides_empty_state(self):
         items = [("test-session", "練習タイトル", 0, "basic")]

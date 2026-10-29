@@ -15,7 +15,7 @@
             <div class="fw-semibold">{{ f.scenario_title }}</div>
             <div class="text-muted small">{{ f.created_at }} / {{ f.mode }} / {{ f.id }}</div>
           </div>
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 feedback-actions" data-sid="{{ f.id }}">
             <a class="btn btn-sm btn-primary" href="/feedback/{{ f.id }}">表示</a>
             <button class="btn btn-sm btn-outline-success btn-regen" type="button" data-sid="{{ f.id }}">再生成</button>
             <button class="btn btn-sm btn-outline-danger btn-del" type="button" data-sid="{{ f.id }}">削除</button>
@@ -37,6 +37,15 @@
 (function(){
   const statusEl = document.getElementById('feedbacks-status');
 
+  function buttonsForSession(sid) {
+    const actions = document.querySelector('.feedback-actions[data-sid="' + sid + '"]');
+    return actions ? actions.querySelectorAll('.btn-regen, .btn-del') : [];
+  }
+
+  function setSessionBusy(sid, busy) {
+    buttonsForSession(sid).forEach(button => { button.disabled = busy; });
+  }
+
   async function postJson(url) {
     const res = await fetch(url, {
       method: 'POST',
@@ -48,10 +57,11 @@
 
   document.querySelectorAll('.btn-regen').forEach(btn => {
     btn.addEventListener('click', async function(){
+      if (btn.disabled) return;
       const sid = btn.getAttribute('data-sid');
       if (!sid) return;
 
-      btn.disabled = true;
+      setSessionBusy(sid, true);
       if (statusEl) statusEl.textContent = '再生成中...';
 
       try {
@@ -59,14 +69,14 @@
         if (!res.ok || !data || data.ok !== true) {
           const msg = (data && (data.error || (data.feedback && data.feedback.error))) ? (data.error || data.feedback.error) : ('再生成に失敗しました（HTTP ' + res.status + '）');
           if (statusEl) statusEl.textContent = msg + '（再度「再生成」から再試行できます）';
-          btn.disabled = false;
+          setSessionBusy(sid, false);
           return;
         }
         if (statusEl) statusEl.textContent = '再生成完了。画面を更新します...';
         location.reload();
       } catch (e) {
         if (statusEl) statusEl.textContent = '通信エラー: ' + (e && e.message ? e.message : e);
-        btn.disabled = false;
+        setSessionBusy(sid, false);
       }
     });
   });
@@ -78,7 +88,7 @@
       if (!sid) return;
       if (!window.confirm('このフィードバックを削除しますか？会話ログは削除されません。')) return;
 
-      btn.disabled = true;
+      setSessionBusy(sid, true);
       if (statusEl) statusEl.textContent = '削除中...';
 
       try {
@@ -86,14 +96,14 @@
         if (!res.ok || !data || data.ok !== true) {
           const msg = (data && data.error) ? data.error : ('削除に失敗しました（HTTP ' + res.status + '）');
           if (statusEl) statusEl.textContent = msg;
-          btn.disabled = false;
+          setSessionBusy(sid, false);
           return;
         }
         if (statusEl) statusEl.textContent = '削除完了。画面を更新します...';
         location.reload();
       } catch (e) {
         if (statusEl) statusEl.textContent = '通信エラー: ' + (e && e.message ? e.message : e);
-        btn.disabled = false;
+        setSessionBusy(sid, false);
       }
     });
   });
