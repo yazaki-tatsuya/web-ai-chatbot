@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Realtime 音声吹き出し</title>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -51,24 +52,30 @@
       font-size: 0.9em;
       color: gray;
     }
+    @media (max-width: 575.98px) {
+      #chat,
+      #status {
+        width: calc(100% - 1rem);
+      }
+    }
   </style>
 </head>
 <body>
   <h3>Realtime Audio Chat</h3>
     <div class="container" style="max-width: 900px;">
-    <div class="d-flex justify-content-between align-items-center mt-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
       <div>
         <h4 class="mb-0">{{ session.scenario_title }}</h4>
         <div class="text-muted small">session: {{ session.id }}</div>
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex flex-wrap gap-2">
         <button id="toggle-devlog" type="button" class="btn btn-outline-secondary btn-sm" aria-controls="status" aria-expanded="false">開発ログを表示</button>
         <a class="btn btn-outline-secondary btn-sm" href="/home">Home</a>
         <button id="end-btn" class="btn btn-danger btn-sm">終了→保存</button>
       </div>
     </div>
   </div>
-  <div class="mb-3">
+  <div class="container mb-3" style="max-width: 900px;">
     <!-- ▼▼ 追加(1/2)：プロンプト入力欄 ▼▼ -->
    <textarea id="prompt" class="form-control mb-2" rows="3" placeholder="ここにシナリオ/設定（システムプロンプト）を入力してください。">{{ instructions }}</textarea>
     <!-- ▲▲ 追加(1/2) ここまで ▲▲ -->

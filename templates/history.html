@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
   <title>履歴</title>
 </head>
@@ -9,7 +10,7 @@
 <div class="container py-4">
   <a href="{{ url_for('home') }}" class="text-decoration-none">← Home</a>
 
-  <div class="d-flex justify-content-between align-items-center mt-2">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
     <h3 class="mb-0">履歴</h3>
     <!-- ★ STG-002 追加：フィードバック一覧への導線 -->
     <a href="/feedbacks" class="btn btn-sm btn-outline-secondary">
@@ -20,12 +21,12 @@
   <div class="list-group mt-3">
     {% for s in sessions %}
       <div class="list-group-item">
-        <div class="d-flex justify-content-between">
+        <div class="d-flex flex-wrap justify-content-between gap-2">
           <div>
             <div class="fw-semibold">{{ s.scenario_title }}</div>
             <div class="text-muted small">{{ s.created_at }} / {{ s.mode }}</div>
           </div>
-          <div class="d-flex gap-2">
+          <div class="d-flex flex-wrap gap-2">
             <a class="btn btn-sm btn-outline-primary" href="/practice/{{ s.id }}">再挑戦</a>
             <a class="btn btn-sm btn-primary" href="/feedback/{{ s.id }}">フィードバック</a>
           </div>
