@@ -13,6 +13,7 @@ function createHarness(template) {
     addEventListener(type, handler) { this[type] = handler; },
     getAttribute() { return 'test-session'; },
   };
+  const otherButton = { disabled: false };
   let failure = true;
   let requests = 0;
   let reloads = 0;
@@ -20,6 +21,11 @@ function createHarness(template) {
     document: {
       getElementById(id) { return id === 'btn-generate-feedback' ? button : status; },
       querySelectorAll(selector) { return selector === '.btn-regen' ? [button] : []; },
+      querySelector(selector) {
+        return selector.includes('test-session')
+          ? { querySelectorAll() { return [button, otherButton]; } }
+          : null;
+      },
     },
     location: { reload() { reloads++; } },
     async fetch(url, options) {
@@ -37,7 +43,7 @@ function createHarness(template) {
   });
   vm.runInContext(script, context);
   return {
-    button, status,
+    button, otherButton, status,
     get requests() { return requests; },
     get reloads() { return reloads; },
     allowSuccess() { failure = false; },
@@ -51,6 +57,7 @@ for (const template of ['feedback.html', 'feedbacks.html']) {
     assert.equal(h.requests, 1);
     assert.equal(h.reloads, 0);
     assert.equal(h.button.disabled, false);
+    if (template === 'feedbacks.html') assert.equal(h.otherButton.disabled, false);
     assert.match(h.status.textContent, /生成に失敗しました/);
     assert.match(h.status.textContent, /再試行できます/);
     h.allowSuccess();
