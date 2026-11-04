@@ -225,6 +225,44 @@ class ListEmptyStateTestCase(unittest.TestCase):
         self.assertIn('data-sid="test-session"', html)
 
 
+class FeedbackPageTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_unknown_session_returns_helpful_404_without_loading_related_data(self):
+        with patch.object(webui.store, "get_session", return_value=None), \
+                patch.object(webui.store, "get_transcript") as get_transcript, \
+                patch.object(webui.store, "get_feedback") as get_feedback:
+            response = self.client.get("/feedback/missing-session")
+
+        self.assertEqual(response.status_code, 404)
+        html = response.get_data(as_text=True)
+        self.assertIn("セッションが見つかりません", html)
+        self.assertIn("missing-session", html)
+        self.assertIn('href="/history">履歴を確認する</a>', html)
+        self.assertIn('href="/modes">新しい練習を始める</a>', html)
+        self.assertIn('name="viewport" content="width=device-width, initial-scale=1"', html)
+        self.assertNotIn("フィードバック結果", html)
+        get_transcript.assert_not_called()
+        get_feedback.assert_not_called()
+
+    def test_existing_session_still_displays_feedback_page(self):
+        meta = Mock(session_id="test-session", title="テストシナリオ")
+        transcript = {"transcript": [{"role": "user", "text": "こんにちは"}]}
+        feedback = {"summary": "保存済みの結果", "score": 80}
+        with patch.object(webui.store, "get_session", return_value=meta), \
+                patch.object(webui.store, "get_transcript", return_value=transcript), \
+                patch.object(webui.store, "get_feedback", return_value=feedback):
+            response = self.client.get("/feedback/test-session")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("フィードバック結果", html)
+        self.assertIn("保存済みの結果", html)
+        self.assertIn("テストシナリオ", html)
+        self.assertNotIn("セッションが見つかりません", html)
+
+
 class FeedbackDisplayTestCase(unittest.TestCase):
     SECTIONS = {
         "better_questions": "次に確認すべき質問",

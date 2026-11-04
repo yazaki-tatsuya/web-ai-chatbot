@@ -407,6 +407,8 @@ def feedbacks():
 @app.route("/feedback/<session_id>")
 def feedback(session_id):
     meta = store.get_session(session_id)
+    if not meta:
+        return render_template("session_not_found.html", session_id=session_id), 404
     log = store.get_transcript(session_id)
 
     # ★追加：feedback.html が期待する変数名に合わせて渡す（既存は残す）

@@ -12,6 +12,7 @@ const templates = [
   'modes.html',
   'practice.html',
   'scenarios.html',
+  'session_not_found.html',
   'shelves.html',
 ];
 
