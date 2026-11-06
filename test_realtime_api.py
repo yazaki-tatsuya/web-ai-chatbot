@@ -81,6 +81,94 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class TranscriptApiTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+        self.meta = Mock(session_id="test-session")
+        self.url = "/api/session/test-session/transcript"
+
+    def post(self, payload):
+        return self.client.post(self.url, json=payload)
+
+    def test_valid_transcript_is_saved_without_removing_future_fields(self):
+        payload = {
+            "ended_at": 1730000000000,
+            "transcript": [
+                {"role": "user", "text": "こんにちは", "ts": 1729999999000,
+                 "future_item_field": "kept"},
+                {"role": "assistant", "text": "こんにちは。", "ts": 1730000000000},
+            ],
+            "future_payload_field": {"version": 2},
+        }
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=True) as save:
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        save.assert_called_once_with("test-session", payload)
+
+    def test_empty_transcript_is_allowed_for_sessions_ended_before_speaking(self):
+        payload = {"ended_at": 1730000000000, "transcript": []}
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=True) as save:
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 200)
+        save.assert_called_once_with("test-session", payload)
+
+    def test_unknown_session_returns_404_without_saving(self):
+        with patch.object(webui.store, "get_session", return_value=None), \
+                patch.object(webui.store, "save_transcript") as save:
+            response = self.post({"transcript": []})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "session not found"})
+        save.assert_not_called()
+
+    def test_non_json_body_returns_400_without_saving(self):
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript") as save:
+            response = self.client.post(self.url, data="not json", content_type="text/plain")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("JSON object", response.get_json()["error"])
+        save.assert_not_called()
+
+    def test_invalid_payloads_return_400_without_saving(self):
+        invalid_cases = [
+            (None, "JSON object"),
+            ([], "JSON object"),
+            ({}, "transcript must be an array"),
+            ({"transcript": {}}, "transcript must be an array"),
+            ({"transcript": ["text"]}, "transcript[0] must be an object"),
+            ({"transcript": [{"role": "system", "text": "x"}]}, "role"),
+            ({"transcript": [{"role": "user", "text": 1}]}, "text"),
+            ({"transcript": [{"role": "user", "text": "  "}]}, "text"),
+            ({"transcript": [{"role": "user", "text": "x", "ts": -1}]}, "ts"),
+            ({"transcript": [{"role": "user", "text": "x", "ts": True}]}, "ts"),
+            ({"transcript": [], "ended_at": -1}, "ended_at"),
+            ({"transcript": [], "ended_at": True}, "ended_at"),
+        ]
+        for payload, expected_error in invalid_cases:
+            with self.subTest(payload=payload), \
+                    patch.object(webui.store, "get_session", return_value=self.meta), \
+                    patch.object(webui.store, "save_transcript") as save:
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.get_json()["ok"])
+                self.assertIn(expected_error, response.get_json()["error"])
+                save.assert_not_called()
+
+    def test_store_failure_returns_500(self):
+        payload = {"transcript": [{"role": "user", "text": "こんにちは"}]}
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=False):
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json(), {"ok": False})
+
+
 class FeedbackGenerationTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
