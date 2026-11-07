@@ -11,6 +11,8 @@ import json
 import threading
 import base64
 import math
+from html import escape
+from urllib.parse import urlsplit
 from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_socketio import SocketIO, emit
@@ -64,6 +66,21 @@ def _is_authorized():
 def _unauthorized_response():
     return jsonify({"ok": False, "error": "unauthorized", "login_url": url_for("login", next=request.path)}), 401
 
+
+def _safe_next_url(value):
+    default_url = url_for("home")
+    if not isinstance(value, str) or not value:
+        return default_url
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return default_url
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return default_url
+
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/"):
+        return default_url
+    return value
+
 def require_auth(fn):
     @wraps(fn)
     def _wrapper(*args, **kwargs):
@@ -74,23 +91,25 @@ def require_auth(fn):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    requested_next = request.form.get("next") or request.args.get("next")
+    next_url = _safe_next_url(requested_next)
+
     # APP_PIN 未設定なら常に許可（既存のローカル運用を崩さない）
     if not _auth_enabled():
         session["authorized"] = True
-        return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+        return redirect(next_url)
 
     if request.method == "POST":
         pin = request.form.get("pin") or ""
         if pin == os.environ.get("APP_PIN"):
             session["authorized"] = True
-            return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+            return redirect(next_url)
         return "<h3>Unauthorized</h3><p>PIN is incorrect.</p>", 401
 
-    next_url = request.args.get("next") or url_for("home")
     return (
         "<h2>Login</h2>"
         "<form method='post'>"
-        f"<input type='hidden' name='next' value='{next_url}'>"
+        f"<input type='hidden' name='next' value='{escape(next_url, quote=True)}'>"
         "<div><input name='pin' type='password' placeholder='PIN'></div>"
         "<div><button type='submit'>Login</button></div>"
         "</form>"

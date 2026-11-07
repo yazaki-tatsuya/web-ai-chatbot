@@ -81,6 +81,74 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class LoginRedirectTestCase(unittest.TestCase):
+    SAFE_PATHS = (
+        "/history",
+        "/feedback/test-session?tab=summary#details",
+        "/modes?mode=basic",
+    )
+    UNSAFE_PATHS = (
+        "https://example.com/phishing",
+        "http://example.com",
+        "//example.com/phishing",
+        "\\\\example.com\\phishing",
+        "/\\example.com/phishing",
+        "javascript:alert(1)",
+        "history",
+        "/history\r\nLocation: https://example.com",
+    )
+
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_safe_next_paths_are_preserved_after_successful_login(self):
+        for next_url in self.SAFE_PATHS:
+            with self.subTest(next_url=next_url), \
+                    patch.object(webui, "_auth_enabled", return_value=True), \
+                    patch.dict(os.environ, {"APP_PIN": "1234"}):
+                response = self.client.post("/login", data={"pin": "1234", "next": next_url})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], next_url)
+
+    def test_unsafe_next_values_fall_back_to_home_after_successful_login(self):
+        for next_url in self.UNSAFE_PATHS:
+            with self.subTest(next_url=next_url), \
+                    patch.object(webui, "_auth_enabled", return_value=True), \
+                    patch.dict(os.environ, {"APP_PIN": "1234"}):
+                response = self.client.post("/login", data={"pin": "1234", "next": next_url})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], "/home")
+
+    def test_auth_disabled_still_restricts_next_to_local_paths(self):
+        with patch.object(webui, "_auth_enabled", return_value=False):
+            safe = self.client.get("/login?next=/history")
+            unsafe = self.client.get("/login?next=https://example.com")
+        self.assertEqual(safe.headers["Location"], "/history")
+        self.assertEqual(unsafe.headers["Location"], "/home")
+
+    def test_login_form_contains_only_sanitized_and_escaped_next_value(self):
+        with patch.object(webui, "_auth_enabled", return_value=True):
+            safe = self.client.get("/login?next=/feedback/test%3Ftab%3D%27summary%27")
+            unsafe = self.client.get("/login?next=https://example.com/%27%3E%3Cscript%3E")
+        safe_html = safe.get_data(as_text=True)
+        unsafe_html = unsafe.get_data(as_text=True)
+        self.assertIn("value='/feedback/test?tab=&#x27;summary&#x27;'", safe_html)
+        self.assertNotIn("<script>", safe_html)
+        self.assertIn("value='/home'", unsafe_html)
+        self.assertNotIn("example.com", unsafe_html)
+
+    def test_wrong_pin_does_not_redirect_or_authorize(self):
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.dict(os.environ, {"APP_PIN": "1234"}):
+            response = self.client.post(
+                "/login", data={"pin": "wrong", "next": "https://example.com"}
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("Location", response.headers)
+        with self.client.session_transaction() as session_data:
+            self.assertIsNot(session_data.get("authorized"), True)
+
+
 class TranscriptApiTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
