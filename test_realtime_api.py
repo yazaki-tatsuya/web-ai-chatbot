@@ -81,6 +81,162 @@ class RealtimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.get_json()["error"], "SDP offer is empty")
 
 
+class LoginRedirectTestCase(unittest.TestCase):
+    SAFE_PATHS = (
+        "/history",
+        "/feedback/test-session?tab=summary#details",
+        "/modes?mode=basic",
+    )
+    UNSAFE_PATHS = (
+        "https://example.com/phishing",
+        "http://example.com",
+        "//example.com/phishing",
+        "\\\\example.com\\phishing",
+        "/\\example.com/phishing",
+        "javascript:alert(1)",
+        "history",
+        "/history\r\nLocation: https://example.com",
+    )
+
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_safe_next_paths_are_preserved_after_successful_login(self):
+        for next_url in self.SAFE_PATHS:
+            with self.subTest(next_url=next_url), \
+                    patch.object(webui, "_auth_enabled", return_value=True), \
+                    patch.dict(os.environ, {"APP_PIN": "1234"}):
+                response = self.client.post("/login", data={"pin": "1234", "next": next_url})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], next_url)
+
+    def test_unsafe_next_values_fall_back_to_home_after_successful_login(self):
+        for next_url in self.UNSAFE_PATHS:
+            with self.subTest(next_url=next_url), \
+                    patch.object(webui, "_auth_enabled", return_value=True), \
+                    patch.dict(os.environ, {"APP_PIN": "1234"}):
+                response = self.client.post("/login", data={"pin": "1234", "next": next_url})
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], "/home")
+
+    def test_auth_disabled_still_restricts_next_to_local_paths(self):
+        with patch.object(webui, "_auth_enabled", return_value=False):
+            safe = self.client.get("/login?next=/history")
+            unsafe = self.client.get("/login?next=https://example.com")
+        self.assertEqual(safe.headers["Location"], "/history")
+        self.assertEqual(unsafe.headers["Location"], "/home")
+
+    def test_login_form_contains_only_sanitized_and_escaped_next_value(self):
+        with patch.object(webui, "_auth_enabled", return_value=True):
+            safe = self.client.get("/login?next=/feedback/test%3Ftab%3D%27summary%27")
+            unsafe = self.client.get("/login?next=https://example.com/%27%3E%3Cscript%3E")
+        safe_html = safe.get_data(as_text=True)
+        unsafe_html = unsafe.get_data(as_text=True)
+        self.assertIn("value='/feedback/test?tab=&#x27;summary&#x27;'", safe_html)
+        self.assertNotIn("<script>", safe_html)
+        self.assertIn("value='/home'", unsafe_html)
+        self.assertNotIn("example.com", unsafe_html)
+
+    def test_wrong_pin_does_not_redirect_or_authorize(self):
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.dict(os.environ, {"APP_PIN": "1234"}):
+            response = self.client.post(
+                "/login", data={"pin": "wrong", "next": "https://example.com"}
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("Location", response.headers)
+        with self.client.session_transaction() as session_data:
+            self.assertIsNot(session_data.get("authorized"), True)
+
+
+class TranscriptApiTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+        self.meta = Mock(session_id="test-session")
+        self.url = "/api/session/test-session/transcript"
+
+    def post(self, payload):
+        return self.client.post(self.url, json=payload)
+
+    def test_valid_transcript_is_saved_without_removing_future_fields(self):
+        payload = {
+            "ended_at": 1730000000000,
+            "transcript": [
+                {"role": "user", "text": "こんにちは", "ts": 1729999999000,
+                 "future_item_field": "kept"},
+                {"role": "assistant", "text": "こんにちは。", "ts": 1730000000000},
+            ],
+            "future_payload_field": {"version": 2},
+        }
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=True) as save:
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        save.assert_called_once_with("test-session", payload)
+
+    def test_empty_transcript_is_allowed_for_sessions_ended_before_speaking(self):
+        payload = {"ended_at": 1730000000000, "transcript": []}
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=True) as save:
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 200)
+        save.assert_called_once_with("test-session", payload)
+
+    def test_unknown_session_returns_404_without_saving(self):
+        with patch.object(webui.store, "get_session", return_value=None), \
+                patch.object(webui.store, "save_transcript") as save:
+            response = self.post({"transcript": []})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "session not found"})
+        save.assert_not_called()
+
+    def test_non_json_body_returns_400_without_saving(self):
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript") as save:
+            response = self.client.post(self.url, data="not json", content_type="text/plain")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("JSON object", response.get_json()["error"])
+        save.assert_not_called()
+
+    def test_invalid_payloads_return_400_without_saving(self):
+        invalid_cases = [
+            (None, "JSON object"),
+            ([], "JSON object"),
+            ({}, "transcript must be an array"),
+            ({"transcript": {}}, "transcript must be an array"),
+            ({"transcript": ["text"]}, "transcript[0] must be an object"),
+            ({"transcript": [{"role": "system", "text": "x"}]}, "role"),
+            ({"transcript": [{"role": "user", "text": 1}]}, "text"),
+            ({"transcript": [{"role": "user", "text": "  "}]}, "text"),
+            ({"transcript": [{"role": "user", "text": "x", "ts": -1}]}, "ts"),
+            ({"transcript": [{"role": "user", "text": "x", "ts": True}]}, "ts"),
+            ({"transcript": [], "ended_at": -1}, "ended_at"),
+            ({"transcript": [], "ended_at": True}, "ended_at"),
+        ]
+        for payload, expected_error in invalid_cases:
+            with self.subTest(payload=payload), \
+                    patch.object(webui.store, "get_session", return_value=self.meta), \
+                    patch.object(webui.store, "save_transcript") as save:
+                response = self.post(payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.get_json()["ok"])
+                self.assertIn(expected_error, response.get_json()["error"])
+                save.assert_not_called()
+
+    def test_store_failure_returns_500(self):
+        payload = {"transcript": [{"role": "user", "text": "こんにちは"}]}
+        with patch.object(webui.store, "get_session", return_value=self.meta), \
+                patch.object(webui.store, "save_transcript", return_value=False):
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json(), {"ok": False})
+
+
 class FeedbackGenerationTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
@@ -223,6 +379,44 @@ class ListEmptyStateTestCase(unittest.TestCase):
         self.assertIn("練習タイトル", html)
         self.assertIn('href="/feedback/test-session"', html)
         self.assertIn('data-sid="test-session"', html)
+
+
+class FeedbackPageTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_unknown_session_returns_helpful_404_without_loading_related_data(self):
+        with patch.object(webui.store, "get_session", return_value=None), \
+                patch.object(webui.store, "get_transcript") as get_transcript, \
+                patch.object(webui.store, "get_feedback") as get_feedback:
+            response = self.client.get("/feedback/missing-session")
+
+        self.assertEqual(response.status_code, 404)
+        html = response.get_data(as_text=True)
+        self.assertIn("セッションが見つかりません", html)
+        self.assertIn("missing-session", html)
+        self.assertIn('href="/history">履歴を確認する</a>', html)
+        self.assertIn('href="/modes">新しい練習を始める</a>', html)
+        self.assertIn('name="viewport" content="width=device-width, initial-scale=1"', html)
+        self.assertNotIn("フィードバック結果", html)
+        get_transcript.assert_not_called()
+        get_feedback.assert_not_called()
+
+    def test_existing_session_still_displays_feedback_page(self):
+        meta = Mock(session_id="test-session", title="テストシナリオ")
+        transcript = {"transcript": [{"role": "user", "text": "こんにちは"}]}
+        feedback = {"summary": "保存済みの結果", "score": 80}
+        with patch.object(webui.store, "get_session", return_value=meta), \
+                patch.object(webui.store, "get_transcript", return_value=transcript), \
+                patch.object(webui.store, "get_feedback", return_value=feedback):
+            response = self.client.get("/feedback/test-session")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("フィードバック結果", html)
+        self.assertIn("保存済みの結果", html)
+        self.assertIn("テストシナリオ", html)
+        self.assertNotIn("セッションが見つかりません", html)
 
 
 class FeedbackDisplayTestCase(unittest.TestCase):

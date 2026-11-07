@@ -10,6 +10,9 @@ load_dotenv()  # .env を読み込む（ローカル用）
 import json
 import threading
 import base64
+import math
+from html import escape
+from urllib.parse import urlsplit
 from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_socketio import SocketIO, emit
@@ -63,6 +66,21 @@ def _is_authorized():
 def _unauthorized_response():
     return jsonify({"ok": False, "error": "unauthorized", "login_url": url_for("login", next=request.path)}), 401
 
+
+def _safe_next_url(value):
+    default_url = url_for("home")
+    if not isinstance(value, str) or not value:
+        return default_url
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return default_url
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return default_url
+
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/"):
+        return default_url
+    return value
+
 def require_auth(fn):
     @wraps(fn)
     def _wrapper(*args, **kwargs):
@@ -73,23 +91,25 @@ def require_auth(fn):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    requested_next = request.form.get("next") or request.args.get("next")
+    next_url = _safe_next_url(requested_next)
+
     # APP_PIN 未設定なら常に許可（既存のローカル運用を崩さない）
     if not _auth_enabled():
         session["authorized"] = True
-        return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+        return redirect(next_url)
 
     if request.method == "POST":
         pin = request.form.get("pin") or ""
         if pin == os.environ.get("APP_PIN"):
             session["authorized"] = True
-            return redirect(request.form.get("next") or request.args.get("next") or url_for("home"))
+            return redirect(next_url)
         return "<h3>Unauthorized</h3><p>PIN is incorrect.</p>", 401
 
-    next_url = request.args.get("next") or url_for("home")
     return (
         "<h2>Login</h2>"
         "<form method='post'>"
-        f"<input type='hidden' name='next' value='{next_url}'>"
+        f"<input type='hidden' name='next' value='{escape(next_url, quote=True)}'>"
         "<div><input name='pin' type='password' placeholder='PIN'></div>"
         "<div><button type='submit'>Login</button></div>"
         "</form>"
@@ -407,6 +427,8 @@ def feedbacks():
 @app.route("/feedback/<session_id>")
 def feedback(session_id):
     meta = store.get_session(session_id)
+    if not meta:
+        return render_template("session_not_found.html", session_id=session_id), 404
     log = store.get_transcript(session_id)
 
     # ★追加：feedback.html が期待する変数名に合わせて渡す（既存は残す）
@@ -427,9 +449,52 @@ def feedback(session_id):
 @app.post("/api/session/<session_id>/transcript")
 @require_auth
 def api_save_transcript(session_id):
-    payload = request.get_json(force=True)
+    if not store.get_session(session_id):
+        return jsonify({"ok": False, "error": "session not found"}), 404
+
+    payload = request.get_json(silent=True)
+    validation_error = _validate_transcript_payload(payload)
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
+
     ok = store.save_transcript(session_id, payload)
-    return jsonify({"ok": ok}), (200 if ok else 404)
+    return jsonify({"ok": ok}), (200 if ok else 500)
+
+
+def _validate_transcript_payload(payload):
+    if not isinstance(payload, dict):
+        return "request body must be a JSON object"
+
+    transcript = payload.get("transcript")
+    if not isinstance(transcript, list):
+        return "transcript must be an array"
+
+    ended_at = payload.get("ended_at")
+    if ended_at is not None and not _is_non_negative_finite_number(ended_at):
+        return "ended_at must be a non-negative finite number"
+
+    for index, item in enumerate(transcript):
+        if not isinstance(item, dict):
+            return f"transcript[{index}] must be an object"
+        if item.get("role") not in ("user", "assistant"):
+            return f"transcript[{index}].role must be user or assistant"
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return f"transcript[{index}].text must be a non-empty string"
+        timestamp = item.get("ts")
+        if timestamp is not None and not _is_non_negative_finite_number(timestamp):
+            return f"transcript[{index}].ts must be a non-negative finite number"
+
+    return None
+
+
+def _is_non_negative_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
 
 # ▼▼▼ 追加：フィードバック生成API（最小差分で追加） ▼▼▼
 def _generate_feedback_with_openai(meta, transcript):
