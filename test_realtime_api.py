@@ -149,6 +149,85 @@ class LoginRedirectTestCase(unittest.TestCase):
             self.assertIsNot(session_data.get("authorized"), True)
 
 
+class SessionStartTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+        self.scenario = {
+            "id": "free_talk",
+            "mode": "basic",
+            "title": "フリートーク",
+            "default_instructions": "既定の指示",
+        }
+
+    def test_known_scenario_with_blank_override_creates_session(self):
+        meta = Mock(session_id="new-session")
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session", return_value=meta) as create:
+            response = self.client.post(
+                "/session/start",
+                data={"scenario_id": " free_talk ", "instructions": "   "},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/?session_id=new-session")
+        create.assert_called_once_with("free_talk", None)
+
+    def test_known_scenario_preserves_trimmed_instruction_override(self):
+        meta = Mock(session_id="new-session")
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session", return_value=meta) as create:
+            response = self.client.post(
+                "/session/start",
+                data={"scenario_id": "free_talk", "instructions": "  短く答える  "},
+            )
+        self.assertEqual(response.status_code, 302)
+        create.assert_called_once_with("free_talk", "短く答える")
+
+    def test_missing_or_unknown_scenario_returns_400_without_creating_session(self):
+        cases = [
+            ({}, "scenario_id is required"),
+            ({"scenario_id": "   "}, "scenario_id is required"),
+            ({"scenario_id": "missing"}, "scenario not found"),
+        ]
+        for form, expected_error in cases:
+            with self.subTest(form=form), \
+                    patch.object(webui.store, "find_scenario", return_value=None), \
+                    patch.object(webui.store, "create_session") as create:
+                response = self.client.post("/session/start", data=form)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"ok": False, "error": expected_error})
+                create.assert_not_called()
+
+    def test_oversized_instructions_are_rejected_without_creating_session(self):
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session") as create:
+            response = self.client.post(
+                "/session/start",
+                data={
+                    "scenario_id": "free_talk",
+                    "instructions": "x" * (webui.MAX_INSTRUCTIONS_LENGTH + 1),
+                },
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(str(webui.MAX_INSTRUCTIONS_LENGTH), response.get_json()["error"])
+        create.assert_not_called()
+
+    def test_pin_enabled_requires_authorization_before_creating_session(self):
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.object(webui.store, "find_scenario") as find_scenario, \
+                patch.object(webui.store, "create_session") as create:
+            response = self.client.post(
+                "/session/start", data={"scenario_id": "free_talk"}
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "unauthorized")
+        self.assertIn("/login?next=/session/start", response.get_json()["login_url"])
+        find_scenario.assert_not_called()
+        create.assert_not_called()
+
+
 class TranscriptApiTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()

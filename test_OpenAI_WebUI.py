@@ -128,6 +128,7 @@ key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
 REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
 REALTIME_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
 url = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
+MAX_INSTRUCTIONS_LENGTH = 10000
 
 # ============================================================
 # LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
@@ -324,9 +325,25 @@ def scenarios():
     return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode, shelf_id=shelf_id)], mode=mode, shelf_id=shelf_id, shelf_title=shelf_title)
 
 @app.post("/session/start")
+@require_auth
 def session_start():
-    scenario_id = request.form.get("scenario_id", "free_talk")
-    instructions = (request.form.get("instructions") or "").strip() or None
+    scenario_id = request.form.get("scenario_id")
+    if not isinstance(scenario_id, str) or not scenario_id.strip():
+        return jsonify({"ok": False, "error": "scenario_id is required"}), 400
+    scenario_id = scenario_id.strip()
+    if not store.find_scenario(scenario_id):
+        return jsonify({"ok": False, "error": "scenario not found"}), 400
+
+    instructions_value = request.form.get("instructions")
+    if instructions_value is not None and not isinstance(instructions_value, str):
+        return jsonify({"ok": False, "error": "instructions must be a string"}), 400
+    instructions = (instructions_value or "").strip() or None
+    if instructions and len(instructions) > MAX_INSTRUCTIONS_LENGTH:
+        return jsonify({
+            "ok": False,
+            "error": f"instructions must be at most {MAX_INSTRUCTIONS_LENGTH} characters",
+        }), 400
+
     meta = store.create_session(scenario_id, instructions)
     return redirect(url_for("index", session_id=meta.session_id))
 
