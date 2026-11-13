@@ -66,8 +66,10 @@ class RealtimeApiTestCase(unittest.TestCase):
                 content_type="application/sdp",
             )
 
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("not configured", response.get_json()["error"])
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json(), {
+            "ok": False, "error": "Realtime service is not configured"
+        })
 
     def test_sdp_proxy_rejects_empty_offer(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
@@ -78,7 +80,76 @@ class RealtimeApiTestCase(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()["error"], "SDP offer is empty")
+        self.assertEqual(response.get_json(), {"ok": False, "error": "SDP offer is empty"})
+
+    def test_sdp_proxy_rejects_wrong_content_type_without_calling_upstream(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch("requests.post") as post:
+            response = self.client.post(
+                "/realtime/sdp-proxy", data="v=0\r\n", content_type="text/plain"
+            )
+        self.assertEqual(response.status_code, 415)
+        self.assertIn("application/sdp", response.get_json()["error"])
+        post.assert_not_called()
+
+    def test_sdp_proxy_rejects_oversized_offer_without_calling_upstream(self):
+        oversized = b"v=0\r\n" + b"x" * webui.MAX_SDP_OFFER_BYTES
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                patch("requests.post") as post:
+            response = self.client.post(
+                "/realtime/sdp-proxy", data=oversized, content_type="application/sdp"
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json()["error"], "SDP offer is too large")
+        post.assert_not_called()
+
+    def test_sdp_proxy_rejects_non_utf8_and_invalid_sdp(self):
+        cases = [
+            (b"\xff\xfe", "SDP offer must be UTF-8 text"),
+            (b"not-an-sdp", "SDP offer is invalid"),
+        ]
+        for body, expected_error in cases:
+            with self.subTest(expected_error=expected_error), \
+                    patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), \
+                    patch("requests.post") as post:
+                response = self.client.post(
+                    "/realtime/sdp-proxy", data=body, content_type="application/sdp"
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], expected_error)
+                post.assert_not_called()
+
+    def test_sdp_proxy_hides_upstream_error_body_and_api_key(self):
+        upstream = Mock()
+        upstream.ok = False
+        upstream.text = "upstream detail containing test-secret-key"
+        upstream.status_code = 401
+        upstream.headers = {"Content-Type": "application/json"}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-secret-key"}), \
+                patch("requests.post", return_value=upstream):
+            response = self.client.post(
+                "/realtime/sdp-proxy", data="v=0\r\n", content_type="application/sdp"
+            )
+        self.assertEqual(response.status_code, 401)
+        body = response.get_data(as_text=True)
+        self.assertNotIn("upstream detail", body)
+        self.assertNotIn("test-secret-key", body)
+        self.assertEqual(response.get_json()["error"],
+                         "Realtime service rejected the SDP offer")
+
+    def test_sdp_proxy_hides_exception_details(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-secret-key"}), \
+                patch("requests.post", side_effect=RuntimeError("internal test-secret-key detail")):
+            response = self.client.post(
+                "/realtime/sdp-proxy", data="v=0\r\n", content_type="application/sdp"
+            )
+        self.assertEqual(response.status_code, 502)
+        body = response.get_data(as_text=True)
+        self.assertNotIn("internal", body)
+        self.assertNotIn("test-secret-key", body)
+        self.assertEqual(response.get_json(), {
+            "ok": False, "error": "Realtime service request failed"
+        })
 
 
 class LoginRedirectTestCase(unittest.TestCase):
@@ -147,6 +218,85 @@ class LoginRedirectTestCase(unittest.TestCase):
         self.assertNotIn("Location", response.headers)
         with self.client.session_transaction() as session_data:
             self.assertIsNot(session_data.get("authorized"), True)
+
+
+class SessionStartTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+        self.scenario = {
+            "id": "free_talk",
+            "mode": "basic",
+            "title": "フリートーク",
+            "default_instructions": "既定の指示",
+        }
+
+    def test_known_scenario_with_blank_override_creates_session(self):
+        meta = Mock(session_id="new-session")
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session", return_value=meta) as create:
+            response = self.client.post(
+                "/session/start",
+                data={"scenario_id": " free_talk ", "instructions": "   "},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/?session_id=new-session")
+        create.assert_called_once_with("free_talk", None)
+
+    def test_known_scenario_preserves_trimmed_instruction_override(self):
+        meta = Mock(session_id="new-session")
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session", return_value=meta) as create:
+            response = self.client.post(
+                "/session/start",
+                data={"scenario_id": "free_talk", "instructions": "  短く答える  "},
+            )
+        self.assertEqual(response.status_code, 302)
+        create.assert_called_once_with("free_talk", "短く答える")
+
+    def test_missing_or_unknown_scenario_returns_400_without_creating_session(self):
+        cases = [
+            ({}, "scenario_id is required"),
+            ({"scenario_id": "   "}, "scenario_id is required"),
+            ({"scenario_id": "missing"}, "scenario not found"),
+        ]
+        for form, expected_error in cases:
+            with self.subTest(form=form), \
+                    patch.object(webui.store, "find_scenario", return_value=None), \
+                    patch.object(webui.store, "create_session") as create:
+                response = self.client.post("/session/start", data=form)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"ok": False, "error": expected_error})
+                create.assert_not_called()
+
+    def test_oversized_instructions_are_rejected_without_creating_session(self):
+        with patch.object(webui.store, "find_scenario", return_value=self.scenario), \
+                patch.object(webui.store, "create_session") as create:
+            response = self.client.post(
+                "/session/start",
+                data={
+                    "scenario_id": "free_talk",
+                    "instructions": "x" * (webui.MAX_INSTRUCTIONS_LENGTH + 1),
+                },
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(str(webui.MAX_INSTRUCTIONS_LENGTH), response.get_json()["error"])
+        create.assert_not_called()
+
+    def test_pin_enabled_requires_authorization_before_creating_session(self):
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.object(webui.store, "find_scenario") as find_scenario, \
+                patch.object(webui.store, "create_session") as create:
+            response = self.client.post(
+                "/session/start", data={"scenario_id": "free_talk"}
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "unauthorized")
+        self.assertIn("/login?next=/session/start", response.get_json()["login_url"])
+        find_scenario.assert_not_called()
+        create.assert_not_called()
 
 
 class TranscriptApiTestCase(unittest.TestCase):

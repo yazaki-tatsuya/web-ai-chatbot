@@ -128,6 +128,8 @@ key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
 REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
 REALTIME_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
 url = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
+MAX_INSTRUCTIONS_LENGTH = 10000
+MAX_SDP_OFFER_BYTES = 1024 * 1024
 
 # ============================================================
 # LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
@@ -324,9 +326,25 @@ def scenarios():
     return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode, shelf_id=shelf_id)], mode=mode, shelf_id=shelf_id, shelf_title=shelf_title)
 
 @app.post("/session/start")
+@require_auth
 def session_start():
-    scenario_id = request.form.get("scenario_id", "free_talk")
-    instructions = (request.form.get("instructions") or "").strip() or None
+    scenario_id = request.form.get("scenario_id")
+    if not isinstance(scenario_id, str) or not scenario_id.strip():
+        return jsonify({"ok": False, "error": "scenario_id is required"}), 400
+    scenario_id = scenario_id.strip()
+    if not store.find_scenario(scenario_id):
+        return jsonify({"ok": False, "error": "scenario not found"}), 400
+
+    instructions_value = request.form.get("instructions")
+    if instructions_value is not None and not isinstance(instructions_value, str):
+        return jsonify({"ok": False, "error": "instructions must be a string"}), 400
+    instructions = (instructions_value or "").strip() or None
+    if instructions and len(instructions) > MAX_INSTRUCTIONS_LENGTH:
+        return jsonify({
+            "ok": False,
+            "error": f"instructions must be at most {MAX_INSTRUCTIONS_LENGTH} characters",
+        }), 400
+
     meta = store.create_session(scenario_id, instructions)
     return redirect(url_for("index", session_id=meta.session_id))
 
@@ -1006,11 +1024,25 @@ def realtime_sdp_proxy():
         import requests
         api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
         if not api_key:
-            return jsonify({"error": "OPENAI_API_KEY (or OPEN_AI_KEY) is not configured"}), 500
+            return jsonify({"ok": False, "error": "Realtime service is not configured"}), 503
 
-        sdp_offer = request.get_data(as_text=True)
+        if request.mimetype != "application/sdp":
+            return jsonify({"ok": False, "error": "Content-Type must be application/sdp"}), 415
+
+        if request.content_length is not None and request.content_length > MAX_SDP_OFFER_BYTES:
+            return jsonify({"ok": False, "error": "SDP offer is too large"}), 413
+
+        sdp_bytes = request.get_data(cache=False)
+        if len(sdp_bytes) > MAX_SDP_OFFER_BYTES:
+            return jsonify({"ok": False, "error": "SDP offer is too large"}), 413
+        try:
+            sdp_offer = sdp_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return jsonify({"ok": False, "error": "SDP offer must be UTF-8 text"}), 400
         if not sdp_offer.strip():
-            return jsonify({"error": "SDP offer is empty"}), 400
+            return jsonify({"ok": False, "error": "SDP offer is empty"}), 400
+        if not sdp_offer.lstrip().startswith("v="):
+            return jsonify({"ok": False, "error": "SDP offer is invalid"}), 400
 
         session_config = {
             "type": "realtime",
@@ -1033,11 +1065,13 @@ def realtime_sdp_proxy():
             files=files,
             timeout=30,
         )
-        content_type = "application/sdp" if res.ok else (res.headers.get("Content-Type") or "text/plain")
-        return res.text, res.status_code, {"Content-Type": content_type}
+        if not res.ok:
+            status_code = res.status_code if 400 <= res.status_code < 600 else 502
+            return jsonify({"ok": False, "error": "Realtime service rejected the SDP offer"}), status_code
+        return res.text, res.status_code, {"Content-Type": "application/sdp"}
     except Exception as e:
         print("SDP Proxy error:", e)
-        return str(e), 500
+        return jsonify({"ok": False, "error": "Realtime service request failed"}), 502
 # クライアントから音声データを受信し、OpenAI WebSocketに転送
 @socketio.on('audio_data')
 def handle_audio_data(data):
