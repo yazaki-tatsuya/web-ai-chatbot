@@ -129,6 +129,7 @@ REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
 REALTIME_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
 url = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 MAX_INSTRUCTIONS_LENGTH = 10000
+MAX_SDP_OFFER_BYTES = 1024 * 1024
 
 # ============================================================
 # LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
@@ -1023,11 +1024,25 @@ def realtime_sdp_proxy():
         import requests
         api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_KEY")
         if not api_key:
-            return jsonify({"error": "OPENAI_API_KEY (or OPEN_AI_KEY) is not configured"}), 500
+            return jsonify({"ok": False, "error": "Realtime service is not configured"}), 503
 
-        sdp_offer = request.get_data(as_text=True)
+        if request.mimetype != "application/sdp":
+            return jsonify({"ok": False, "error": "Content-Type must be application/sdp"}), 415
+
+        if request.content_length is not None and request.content_length > MAX_SDP_OFFER_BYTES:
+            return jsonify({"ok": False, "error": "SDP offer is too large"}), 413
+
+        sdp_bytes = request.get_data(cache=False)
+        if len(sdp_bytes) > MAX_SDP_OFFER_BYTES:
+            return jsonify({"ok": False, "error": "SDP offer is too large"}), 413
+        try:
+            sdp_offer = sdp_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return jsonify({"ok": False, "error": "SDP offer must be UTF-8 text"}), 400
         if not sdp_offer.strip():
-            return jsonify({"error": "SDP offer is empty"}), 400
+            return jsonify({"ok": False, "error": "SDP offer is empty"}), 400
+        if not sdp_offer.lstrip().startswith("v="):
+            return jsonify({"ok": False, "error": "SDP offer is invalid"}), 400
 
         session_config = {
             "type": "realtime",
@@ -1050,11 +1065,13 @@ def realtime_sdp_proxy():
             files=files,
             timeout=30,
         )
-        content_type = "application/sdp" if res.ok else (res.headers.get("Content-Type") or "text/plain")
-        return res.text, res.status_code, {"Content-Type": content_type}
+        if not res.ok:
+            status_code = res.status_code if 400 <= res.status_code < 600 else 502
+            return jsonify({"ok": False, "error": "Realtime service rejected the SDP offer"}), status_code
+        return res.text, res.status_code, {"Content-Type": "application/sdp"}
     except Exception as e:
         print("SDP Proxy error:", e)
-        return str(e), 500
+        return jsonify({"ok": False, "error": "Realtime service request failed"}), 502
 # クライアントから音声データを受信し、OpenAI WebSocketに転送
 @socketio.on('audio_data')
 def handle_audio_data(data):
