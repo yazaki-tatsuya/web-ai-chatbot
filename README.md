@@ -63,6 +63,8 @@ python test_OpenAI_WebUI.py
 | 変数 | 必須 | 既定値 | 用途 |
 |---|---:|---|---|
 | `FLASK_SECRET_KEY` | 本番では必須 | 開発用の非安全な値 | Flaskセッションの署名 |
+| `SESSION_COOKIE_SECURE` | HTTPS本番環境では推奨 | `0` | `1`でセッションCookieをHTTPS通信のみに制限 |
+| `SOCKETIO_ALLOWED_ORIGINS` | 任意 | 同一Originのみ | 追加で許可するSocket.IO Originをカンマ区切りで指定 |
 | `OPENAI_API_KEY` | OpenAI機能利用時 | なし | Realtime API・フィードバック生成 |
 | `OPENAI_REALTIME_MODEL` | 任意 | `gpt-realtime-2.1` | Realtimeモデル |
 | `OPENAI_REALTIME_VOICE` | 任意 | `marin` | Realtime音声 |
@@ -73,6 +75,8 @@ python test_OpenAI_WebUI.py
 | `ENABLE_LEGACY_OPENAI_WS` | 任意 | `0` | 旧Socket.IO／WebSocket経路を有効化 |
 
 旧環境との互換用として`OPEN_AI_KEY`も認識しますが、新規設定では`OPENAI_API_KEY`を使用してください。
+
+本番環境をHTTPSで公開する場合は`SESSION_COOKIE_SECURE=1`を設定してください。Socket.IOは既定で同一Originだけを許可します。別Originのフロントエンドが必要な場合のみ、完全なOrigin（例：`https://app.example.com`）を`SOCKETIO_ALLOWED_ORIGINS`へ列挙してください。ワイルドカード`*`は受け付けません。
 
 ## テスト
 

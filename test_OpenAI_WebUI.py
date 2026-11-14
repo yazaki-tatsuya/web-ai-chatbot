@@ -40,6 +40,55 @@ def _load_flask_secret_key():
     )
     return "local-dev-secret-change-me"
 
+
+def _load_boolean_environment(name, default=False):
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    warnings.warn(
+        f"{name} has an invalid boolean value; using {default}.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return default
+
+
+def _load_socketio_allowed_origins():
+    configured = os.environ.get("SOCKETIO_ALLOWED_ORIGINS")
+    if configured is None or not configured.strip():
+        return None
+
+    origins = []
+    for value in configured.split(","):
+        origin = value.strip().rstrip("/")
+        if not origin or origin in origins:
+            continue
+        parsed = urlsplit(origin)
+        if (
+            origin == "*"
+            or parsed.scheme not in ("http", "https")
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            warnings.warn(
+                f"Ignoring invalid SOCKETIO_ALLOWED_ORIGINS entry: {origin!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        origins.append(origin)
+
+    return origins or None
+
 try:
     app.json.ensure_ascii = False   # Flask 2.2+ 系
 except Exception:
@@ -48,7 +97,12 @@ except Exception:
 app.config['SECRET_KEY'] = _load_flask_secret_key()
 app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.config['SESSION_COOKIE_SECURE'] = _load_boolean_environment("SESSION_COOKIE_SECURE")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins=_load_socketio_allowed_origins(),
+    async_mode='eventlet',
+)
 
 # ============================================================
 # SEC-001: 簡易認可（PIN）

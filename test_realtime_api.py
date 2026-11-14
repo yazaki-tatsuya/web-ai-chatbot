@@ -57,6 +57,60 @@ class RealtimeApiTestCase(unittest.TestCase):
 
         self.assertEqual(secret_key, "local-dev-secret-change-me")
 
+    def test_boolean_environment_parses_supported_values_and_rejects_invalid_value(self):
+        for value in ("1", "true", "TRUE", "yes", "on"):
+            with self.subTest(value=value), patch.dict(
+                    os.environ, {"TEST_BOOLEAN": value}):
+                self.assertTrue(webui._load_boolean_environment("TEST_BOOLEAN"))
+        for value in ("0", "false", "FALSE", "no", "off"):
+            with self.subTest(value=value), patch.dict(
+                    os.environ, {"TEST_BOOLEAN": value}):
+                self.assertFalse(webui._load_boolean_environment("TEST_BOOLEAN", True))
+        with patch.dict(os.environ, {"TEST_BOOLEAN": "invalid"}), \
+                self.assertWarns(RuntimeWarning):
+            self.assertFalse(webui._load_boolean_environment("TEST_BOOLEAN"))
+
+    def test_socketio_origins_default_to_same_origin(self):
+        env = {key: value for key, value in os.environ.items()
+               if key != "SOCKETIO_ALLOWED_ORIGINS"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(webui._load_socketio_allowed_origins())
+
+    def test_socketio_origins_are_normalized_and_deduplicated(self):
+        configured = (
+            " https://app.example.com/,http://localhost:3000,"
+            "https://app.example.com "
+        )
+        with patch.dict(os.environ, {"SOCKETIO_ALLOWED_ORIGINS": configured}):
+            self.assertEqual(webui._load_socketio_allowed_origins(), [
+                "https://app.example.com", "http://localhost:3000"
+            ])
+
+    def test_socketio_origins_ignore_wildcard_and_invalid_entries(self):
+        configured = (
+            "*,javascript:alert(1),https://user:pass@app.example.com,"
+            "https://app.example.com/path,https://safe.example.com"
+        )
+        with patch.dict(os.environ, {"SOCKETIO_ALLOWED_ORIGINS": configured}), \
+                self.assertWarns(RuntimeWarning):
+            self.assertEqual(
+                webui._load_socketio_allowed_origins(), ["https://safe.example.com"]
+            )
+
+    def test_secure_session_cookie_is_configurable(self):
+        original = webui.app.config["SESSION_COOKIE_SECURE"]
+        try:
+            webui.app.config["SESSION_COOKIE_SECURE"] = True
+            client = webui.app.test_client()
+            with patch.object(webui, "_auth_enabled", return_value=False):
+                response = client.get("/login")
+            cookie = response.headers.get("Set-Cookie", "")
+            self.assertIn("Secure", cookie)
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("SameSite=Strict", cookie)
+        finally:
+            webui.app.config["SESSION_COOKIE_SECURE"] = original
+
     def test_sdp_proxy_rejects_missing_key(self):
         env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPEN_AI_KEY")}
         with patch.dict(os.environ, env, clear=True):
