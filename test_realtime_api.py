@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import Mock, patch
 
 import test_OpenAI_WebUI as webui
@@ -506,7 +507,77 @@ class FeedbackGenerationTestCase(unittest.TestCase):
         self.assertEqual(self.store.get_feedback(self.meta.session_id)["summary"], "更新された結果")
 
 
+class PageAuthenticationTestCase(unittest.TestCase):
+    PROTECTED_PATHS = (
+        "/history",
+        "/history?page=2&page_size=10",
+        "/feedbacks",
+        "/feedback/test-session",
+        "/practice/test-session",
+    )
+
+    def setUp(self):
+        self.client = webui.app.test_client()
+
+    def test_pin_enabled_redirects_protected_pages_to_login(self):
+        with patch.object(webui, "_auth_enabled", return_value=True):
+            for path in self.PROTECTED_PATHS:
+                with self.subTest(path=path):
+                    response = self.client.get(path)
+                    self.assertEqual(response.status_code, 302)
+                    location = response.headers["Location"]
+                    parsed = urlsplit(location)
+                    self.assertEqual(parsed.path, "/login")
+                    self.assertEqual(parse_qs(parsed.query)["next"], [path])
+
+    def test_login_returns_user_to_original_get_page(self):
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.dict(os.environ, {"APP_PIN": "1234"}):
+            protected = self.client.get("/history?page=2&page_size=10")
+            login_url = protected.headers["Location"]
+            login_page = self.client.get(login_url)
+            self.assertEqual(login_page.status_code, 200)
+            self.assertIn("/history?page=2&amp;page_size=10",
+                          login_page.get_data(as_text=True))
+            response = self.client.post(
+                "/login",
+                data={"pin": "1234", "next": "/history?page=2&page_size=10"},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/history?page=2&page_size=10")
+
+    def test_authenticated_session_can_access_protected_page(self):
+        with self.client.session_transaction() as session_data:
+            session_data["authorized"] = True
+        with patch.object(webui, "_auth_enabled", return_value=True), \
+                patch.object(webui.store, "list_sessions", return_value=[]):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("履歴", response.get_data(as_text=True))
+
+    def test_auth_disabled_keeps_protected_pages_accessible(self):
+        with patch.object(webui, "_auth_enabled", return_value=False), \
+                patch.object(webui.store, "list_sessions", return_value=[]):
+            response = self.client.get("/history")
+        self.assertEqual(response.status_code, 200)
+
+    def test_api_authentication_still_returns_json_401(self):
+        with patch.object(webui, "_auth_enabled", return_value=True):
+            response = self.client.post(
+                "/api/session/test-session/transcript", json={"transcript": []}
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "unauthorized")
+        self.assertIn("/login?next=/api/session/test-session/transcript",
+                      response.get_json()["login_url"])
+
+
 class HistoryNavigationTestCase(unittest.TestCase):
+    def setUp(self):
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+
     def test_home_link_returns_home_without_creating_session(self):
         client = webui.app.test_client()
         with patch.object(webui.store, "list_sessions", return_value=[]), \
@@ -542,6 +613,9 @@ class ModeNavigationTestCase(unittest.TestCase):
 class ListEmptyStateTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
 
     def test_empty_history_shows_practice_link(self):
         with patch.object(webui.store, "list_sessions", return_value=[]):
@@ -588,6 +662,9 @@ class ListEmptyStateTestCase(unittest.TestCase):
 class FeedbackPageTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
+        self.auth_patch = patch.object(webui, "_auth_enabled", return_value=False)
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
 
     def test_unknown_session_returns_helpful_404_without_loading_related_data(self):
         with patch.object(webui.store, "get_session", return_value=None), \

@@ -78,6 +78,8 @@ python test_OpenAI_WebUI.py
 
 本番環境をHTTPSで公開する場合は`SESSION_COOKIE_SECURE=1`を設定してください。Socket.IOは既定で同一Originだけを許可します。別Originのフロントエンドが必要な場合のみ、完全なOrigin（例：`https://app.example.com`）を`SOCKETIO_ALLOWED_ORIGINS`へ列挙してください。ワイルドカード`*`は受け付けません。
 
+`APP_PIN`を設定すると、練習セッション、履歴、会話ログ、フィードバック画面と変更系APIが認証対象になります。未設定時は従来どおり認証なしで利用できます。
+
 ## テスト
 
 ### Python構文チェック

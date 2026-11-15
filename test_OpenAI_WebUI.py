@@ -143,6 +143,16 @@ def require_auth(fn):
         return _unauthorized_response()
     return _wrapper
 
+
+def require_page_auth(fn):
+    @wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if _is_authorized():
+            return fn(*args, **kwargs)
+        next_url = request.full_path.rstrip("?")
+        return redirect(url_for("login", next=next_url))
+    return _wrapper
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     requested_next = request.form.get("next") or request.args.get("next")
@@ -326,6 +336,7 @@ def index():
 
 # ★追加：feedback.html の「同じシナリオで再挑戦」リンク対応
 @app.route('/practice/<session_id>')
+@require_page_auth
 def practice(session_id):
     meta = store.get_session(session_id) if session_id else None
     if not meta:
@@ -403,6 +414,7 @@ def session_start():
     return redirect(url_for("index", session_id=meta.session_id))
 
 @app.route("/history")
+@require_page_auth
 def history():
     # UI改善（溜まり過ぎ対策）：/history をページング表示
     # - 既存の store.list_sessions() はそのまま利用し、ここでスライスする
@@ -484,6 +496,7 @@ def history():
 
 # ▼▼▼ STG-002: 生成済フィードバック一覧 ▼▼▼
 @app.route("/feedbacks")
+@require_page_auth
 def feedbacks():
     items = []
     for sid, title, created_at, mode in store.list_feedback_sessions():
@@ -497,6 +510,7 @@ def feedbacks():
 # ▲▲▲ 追加ここまで ▲▲▲
 
 @app.route("/feedback/<session_id>")
+@require_page_auth
 def feedback(session_id):
     meta = store.get_session(session_id)
     if not meta:
