@@ -10,7 +10,8 @@ style.css
 *.png
 *進捗*
 *memo*
-*.md
+# ローカル作業資料（公開用のMarkdownは一律に除外しない）
+/ドキュメント/
 *old*
 
 # SQLite
