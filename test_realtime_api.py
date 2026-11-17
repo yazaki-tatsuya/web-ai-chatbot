@@ -591,6 +591,14 @@ class HistoryNavigationTestCase(unittest.TestCase):
             self.assertIn("コミュニケーション練習", home.get_data(as_text=True))
             create_session.assert_not_called()
 
+    def test_history_requests_enough_sessions_for_pagination(self):
+        client = webui.app.test_client()
+        with patch.object(webui.store, "list_sessions", return_value=[]) as list_sessions:
+            response = client.get("/history")
+
+        self.assertEqual(response.status_code, 200)
+        list_sessions.assert_called_once_with(limit=webui.MAX_HISTORY_SESSIONS)
+
 
 class ModeNavigationTestCase(unittest.TestCase):
     def test_home_link_returns_home_without_creating_session(self):

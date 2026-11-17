@@ -194,6 +194,7 @@ REALTIME_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
 url = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 MAX_INSTRUCTIONS_LENGTH = 10000
 MAX_SDP_OFFER_BYTES = 1024 * 1024
+MAX_HISTORY_SESSIONS = 200
 
 # ============================================================
 # LEGACY: OpenAI Realtime WebSocket経路（Socket.IO連携）を使うか
@@ -435,7 +436,7 @@ def history():
     if page_size > 200:
         page_size = 200
 
-    all_sessions = list(store.list_sessions())
+    all_sessions = list(store.list_sessions(limit=MAX_HISTORY_SESSIONS))
     total = len(all_sessions)
     total_pages = max(1, (total + page_size - 1) // page_size)
     if page > total_pages:
