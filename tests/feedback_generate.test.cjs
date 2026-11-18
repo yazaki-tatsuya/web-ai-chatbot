@@ -51,6 +51,19 @@ function createHarness(template) {
 }
 
 for (const template of ['feedback.html', 'feedbacks.html']) {
+  test(`${template}: status updates use an accessible live region`, () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'templates', template), 'utf8');
+    const statusId = template === 'feedback.html'
+      ? 'generate-feedback-status'
+      : 'feedbacks-status';
+    const status = html.match(new RegExp(`<div\\b[^>]*id="${statusId}"[^>]*>`));
+
+    assert.ok(status);
+    assert.match(status[0], /role="status"/);
+    assert.match(status[0], /aria-live="polite"/);
+    assert.match(status[0], /aria-atomic="true"/);
+  });
+
   test(`${template}: generation failure displays retry guidance without reloading`, async () => {
     const h = createHarness(template);
     await h.button.click();
