@@ -18,8 +18,8 @@
 
             <form class="mt-3" method="post" action="/session/start">
               <input type="hidden" name="scenario_id" value="{{ s.id }}" />
-              <label class="form-label small text-muted">（任意）シナリオ指示を上書き</label>
-              <textarea class="form-control" name="instructions" rows="3"
+              <label class="form-label small text-muted" for="instructions-{{ s.id }}">（任意）シナリオ指示を上書き</label>
+              <textarea class="form-control" id="instructions-{{ s.id }}" name="instructions" rows="3" maxlength="{{ max_instructions_length }}"
                 placeholder="空欄ならデフォルトを使用します">{{ s.default_instructions }}</textarea>
 
               <div class="d-flex gap-2 mt-2">

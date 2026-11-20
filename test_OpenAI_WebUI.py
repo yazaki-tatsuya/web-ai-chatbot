@@ -389,7 +389,14 @@ def scenarios():
                     break
         except Exception:
             shelf_title = None
-    return render_template("scenarios.html", scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode, shelf_id=shelf_id)], mode=mode, shelf_id=shelf_id, shelf_title=shelf_title)
+    return render_template(
+        "scenarios.html",
+        scenarios=[_make_scenario_view(s) for s in store.list_scenarios(mode, shelf_id=shelf_id)],
+        mode=mode,
+        shelf_id=shelf_id,
+        shelf_title=shelf_title,
+        max_instructions_length=MAX_INSTRUCTIONS_LENGTH,
+    )
 
 @app.post("/session/start")
 @require_auth

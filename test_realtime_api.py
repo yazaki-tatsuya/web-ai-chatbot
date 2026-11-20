@@ -354,6 +354,26 @@ class SessionStartTestCase(unittest.TestCase):
         create.assert_not_called()
 
 
+class ScenarioFormTestCase(unittest.TestCase):
+    def test_instruction_override_has_label_and_client_side_length_limit(self):
+        scenario = {
+            "id": "free_talk",
+            "mode": "basic",
+            "title": "フリートーク",
+            "default_instructions": "短く答える",
+        }
+        client = webui.app.test_client()
+        with patch.object(webui.store, "list_shelves", return_value=[]), \
+                patch.object(webui.store, "list_scenarios", return_value=[scenario]):
+            response = client.get("/scenarios?mode=basic")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('for="instructions-free_talk"', html)
+        self.assertIn('id="instructions-free_talk"', html)
+        self.assertIn(f'maxlength="{webui.MAX_INSTRUCTIONS_LENGTH}"', html)
+
+
 class TranscriptApiTestCase(unittest.TestCase):
     def setUp(self):
         self.client = webui.app.test_client()
